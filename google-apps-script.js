@@ -8,7 +8,7 @@
  * then redeploy with Deploy → Manage deployments → edit → New version.
  */
 
-var VERSION = 1;
+var VERSION = 2;
 
 /* Sheet tabs are created automatically on first run. */
 var TABS = {
@@ -155,6 +155,25 @@ function normEmail(e) {
   return String(e || '').trim().toLowerCase();
 }
 
+/**
+ * Levels always come back as "3.0", never "3".
+ *
+ * Google Sheets stores a typed "3.0" as the number 3, so the raw cell value
+ * would never match the app's "3.0" option and those teams would silently
+ * find no eligible subs. Non-numeric labels (e.g. "Open") pass through.
+ */
+function normLevel(v) {
+  var s = String(v == null ? '' : v).trim();
+  if (s === '') return '';
+  var n = Number(s);
+  if (isNaN(n)) return s;
+  return n.toFixed(1);
+}
+
+function normLevelList(v) {
+  return splitList(v).map(normLevel);
+}
+
 /** Sheet cells come back as Date objects or strings — normalize to YYYY-MM-DD. */
 function toDateString(v) {
   if (!v) return '';
@@ -217,7 +236,7 @@ function loadTeams() {
     out.push({
       id: id,
       name: String(r['Team Name']).trim(),
-      level: String(r.Level).trim(),
+      level: normLevel(r.Level),
       captain: String(r.Captain).trim(),
       captainEmail: normEmail(r['Captain Email'])
     });
@@ -237,7 +256,7 @@ function loadSubs() {
       name: String(r.Name).trim(),
       email: normEmail(r.Email),
       phone: String(r.Phone || '').trim(),
-      levels: splitList(r.Levels),
+      levels: normLevelList(r.Levels),
       teams: splitList(r.Teams),
       verified: isTrue(r.Verified),
       addedBy: String(r['Added By'] || '').trim(),
@@ -257,7 +276,7 @@ function loadRequests() {
     out.push({
       id: String(r.ID).trim(),
       teamId: String(r.TeamID).trim(),
-      level: String(r.Level).trim(),
+      level: normLevel(r.Level),
       date: toDateString(r.Date),
       time: toTimeString(r.Time),
       location: String(r.Location || '').trim(),
