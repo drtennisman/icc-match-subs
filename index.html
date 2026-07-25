@@ -1,0 +1,1872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#021f3d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <title>Match Subs</title>
+  <style>
+    /* ─── Reset & Base ─────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f0f4f0;
+      color: #1a1a1a;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+      padding-bottom: 70px;
+    }
+
+    /* ─── Header ───────────────────────────────────── */
+    .header {
+      background: linear-gradient(180deg, #052d54 0%, #021f3d 100%);
+      color: #fff;
+      padding: 20px 16px 16px;
+      text-align: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .header h1 { font-size: 20px; font-weight: 700; letter-spacing: 0.5px; }
+    .header .user-badge {
+      display: inline-block;
+      margin-top: 6px;
+      font-size: 12px;
+      background: rgba(255,255,255,0.15);
+      padding: 3px 12px;
+      border-radius: 20px;
+    }
+
+    /* ─── Container ────────────────────────────────── */
+    .container { max-width: 500px; margin: 0 auto; padding: 16px; }
+    @media (min-width: 600px) { .container { max-width: 700px; } }
+
+    /* ─── Screens ──────────────────────────────────── */
+    .screen { display: none; }
+    .screen.active { display: block; }
+
+    /* ─── Cards ────────────────────────────────────── */
+    .card {
+      background: #fff;
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 14px;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+    }
+    .card h2 { font-size: 17px; margin-bottom: 4px; color: #052d54; }
+    .card .card-sub { font-size: 13px; color: #777; margin-bottom: 16px; line-height: 1.5; }
+
+    .section-title {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #8a8a8a;
+      margin: 4px 0 10px;
+    }
+
+    /* ─── Buttons ──────────────────────────────────── */
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      text-align: center;
+      transition: opacity 0.2s;
+      font-family: inherit;
+    }
+    .btn:active { opacity: 0.8; }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn + .btn { margin-top: 10px; }
+
+    .btn-primary { background: linear-gradient(135deg, #052d54, #021f3d); color: #fff; }
+    .btn-claim   { background: #28a745; color: #fff; }
+    .btn-danger  { background: #dc3545; color: #fff; }
+    .btn-outline { background: transparent; color: #052d54; border: 2px solid #052d54; }
+    .btn-ghost   { background: #f1f3f5; color: #495057; }
+    .btn-small {
+      display: inline-block; width: auto;
+      padding: 8px 16px; font-size: 13px; border-radius: 8px;
+    }
+
+    /* ─── Form Inputs ─────────────────────────────── */
+    .form-group { margin-bottom: 16px; }
+    .form-group label {
+      display: block; font-size: 13px; font-weight: 600;
+      color: #555; margin-bottom: 6px;
+    }
+    .form-group input, .form-group select, .form-group textarea {
+      width: 100%; padding: 12px;
+      border: 2px solid #e0e0e0; border-radius: 10px;
+      font-size: 16px; font-family: inherit;
+      background: #fafafa; transition: border-color 0.2s;
+    }
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+      outline: none; border-color: #052d54; background: #fff;
+    }
+    .form-group textarea { resize: vertical; min-height: 70px; }
+    .form-hint { font-size: 12px; color: #999; margin-top: 5px; line-height: 1.4; }
+    .form-row { display: flex; gap: 10px; }
+    .form-row .form-group { flex: 1; }
+
+    /* ─── Chip pickers (levels / teams) ───────────── */
+    .chip-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip {
+      padding: 9px 16px;
+      border: 2px solid #e0e0e0;
+      background: #fafafa;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #555;
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: inherit;
+    }
+    .chip.selected {
+      background: #052d54; border-color: #052d54; color: #fff;
+    }
+    .chip-wide { border-radius: 12px; text-align: left; width: 100%; }
+
+    /* ─── Match Card ──────────────────────────────── */
+    .match-card { position: relative; }
+    .match-team {
+      font-size: 16px; font-weight: 700; color: #052d54;
+      display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+    }
+    .match-when { font-size: 14px; color: #333; margin-top: 5px; font-weight: 600; }
+    .match-meta { font-size: 13px; color: #777; margin-top: 5px; line-height: 1.5; }
+    .match-notes {
+      font-size: 13px; color: #555; margin-top: 10px;
+      background: #f8f9fa; padding: 10px 12px; border-radius: 8px;
+      line-height: 1.5;
+    }
+    .match-actions { margin-top: 14px; display: flex; gap: 8px; }
+    .match-actions .btn { flex: 1; }
+
+    .badge {
+      display: inline-block; font-size: 10px; font-weight: 700;
+      padding: 3px 10px; border-radius: 20px;
+      text-transform: uppercase; letter-spacing: 0.5px;
+      vertical-align: middle;
+    }
+    .badge-urgent  { background: #dc3545; color: #fff; }
+    .badge-level   { background: #052d54; color: #fff; }
+    .badge-filled  { background: #d4edda; color: #155724; }
+    .badge-open    { background: #fff3cd; color: #856404; }
+    .badge-yours   { background: #e9ecef; color: #495057; }
+    .badge-onlist  { background: #d4edda; color: #155724; }
+    .badge-maxed   { background: #f8d7da; color: #721c24; }
+
+    /* ─── Sub picker rows ─────────────────────────── */
+    .level-group { margin-bottom: 18px; }
+    .level-head {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 8px;
+    }
+    .level-head .lvl {
+      font-size: 14px; font-weight: 700; color: #052d54;
+    }
+    .level-head .lvl small { font-weight: 500; color: #999; font-size: 12px; }
+    .link-btn {
+      background: none; border: none; color: #052d54;
+      font-size: 12px; font-weight: 700; cursor: pointer;
+      font-family: inherit; padding: 4px;
+    }
+
+    .sub-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px; border: 2px solid #eee; border-radius: 12px;
+      margin-bottom: 8px; cursor: pointer; background: #fff;
+      transition: all 0.15s;
+    }
+    .sub-row.selected { border-color: #052d54; background: #f5f9ff; }
+    .sub-check {
+      width: 22px; height: 22px; border-radius: 6px;
+      border: 2px solid #ccc; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; color: #fff; font-weight: 700;
+    }
+    .sub-row.selected .sub-check { background: #052d54; border-color: #052d54; }
+    .sub-info { flex: 1; min-width: 0; }
+    .sub-name { font-size: 15px; font-weight: 600; }
+    .sub-detail { font-size: 12px; color: #888; margin-top: 3px; }
+
+    /* ─── Lists ───────────────────────────────────── */
+    .list-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 14px 0; border-bottom: 1px solid #f0f0f0; gap: 12px;
+    }
+    .list-row:last-child { border-bottom: none; }
+    .list-name { font-size: 15px; font-weight: 600; }
+    .list-detail { font-size: 12px; color: #888; margin-top: 3px; line-height: 1.4; }
+
+    /* ─── Status / empty / loading ────────────────── */
+    .empty {
+      text-align: center; padding: 40px 20px; color: #999;
+      font-size: 14px; line-height: 1.6;
+    }
+    .empty .empty-icon { font-size: 40px; margin-bottom: 12px; display: block; }
+    .loading { text-align: center; padding: 40px 0; }
+    .spinner {
+      width: 30px; height: 30px; margin: 0 auto;
+      border: 3px solid #e0e0e0; border-top-color: #052d54;
+      border-radius: 50%; animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .notice {
+      background: #fff3cd; border: 1px solid #ffe69c; color: #856404;
+      padding: 12px 14px; border-radius: 10px;
+      font-size: 13px; line-height: 1.5; margin-bottom: 14px;
+    }
+    .notice-info {
+      background: #e7f1ff; border-color: #cfe2ff; color: #084298;
+    }
+
+    /* ─── Bottom Nav ───────────────────────────────── */
+    .bottom-nav {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: #fff; border-top: 1px solid #e0e0e0;
+      display: flex; z-index: 100;
+      padding-bottom: env(safe-area-inset-bottom, 0);
+    }
+    .nav-tab {
+      flex: 1; padding: 10px 0 8px; text-align: center;
+      font-size: 11px; font-weight: 600; color: #999;
+      background: none; border: none; cursor: pointer;
+      transition: color 0.2s; position: relative; font-family: inherit;
+    }
+    .nav-tab.active { color: #052d54; }
+    .nav-tab svg { display: block; margin: 0 auto 3px; width: 22px; height: 22px; fill: #999; }
+    .nav-tab.active svg { fill: #052d54; }
+    .nav-badge {
+      position: absolute; top: 6px; right: 50%; margin-right: -22px;
+      background: #dc3545; color: #fff; font-size: 10px; font-weight: 700;
+      min-width: 17px; height: 17px; line-height: 17px;
+      border-radius: 9px; padding: 0 4px;
+    }
+
+    /* ─── Toast ────────────────────────────────────── */
+    .toast {
+      position: fixed; bottom: 84px; left: 50%; transform: translateX(-50%);
+      background: #1a1a1a; color: #fff; padding: 12px 22px;
+      border-radius: 24px; font-size: 14px; font-weight: 600;
+      z-index: 300; opacity: 0; pointer-events: none;
+      transition: opacity 0.25s; max-width: 90%; text-align: center;
+    }
+    .toast.show { opacity: 1; }
+
+    /* ─── Modal ────────────────────────────────────── */
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+      z-index: 400; display: none;
+      align-items: center; justify-content: center; padding: 20px;
+    }
+    .modal-backdrop.show { display: flex; }
+    .modal {
+      background: #fff; border-radius: 16px; padding: 24px;
+      max-width: 380px; width: 100%;
+    }
+    .modal h3 { font-size: 18px; color: #052d54; margin-bottom: 10px; }
+    .modal p { font-size: 14px; color: #555; line-height: 1.6; margin-bottom: 18px; }
+
+    .demo-banner {
+      background: #6f42c1; color: #fff; text-align: center;
+      font-size: 11px; font-weight: 700; padding: 5px;
+      letter-spacing: 0.5px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="demo-banner" id="demoBanner">DEMO MODE — sample data, nothing is saved or emailed</div>
+
+<div class="header">
+  <h1 id="headerTitle">Match Subs</h1>
+  <div class="user-badge" id="userBadge">Not set up</div>
+</div>
+
+<div class="container">
+
+  <!-- ══════════ WELCOME / SETUP ══════════ -->
+  <div class="screen active" id="setupScreen">
+    <div class="card">
+      <h2>Welcome</h2>
+      <p class="card-sub">This app connects team captains who need a sub with players willing to fill in. Which one are you?</p>
+      <button class="btn btn-primary" onclick="chooseRole('sub')">I want to sub for teams</button>
+      <button class="btn btn-outline" onclick="chooseRole('captain')">I'm a team captain</button>
+      <p class="form-hint" style="margin-top:14px;">Captains can also sign up as a sub — you can add that later from the Me tab.</p>
+    </div>
+  </div>
+
+  <!-- ══════════ SUB SIGNUP ══════════ -->
+  <div class="screen" id="signupScreen">
+    <div class="card">
+      <h2>Sign up to sub</h2>
+      <p class="card-sub">Tell us how to reach you and which matches you'd actually want. You'll only be emailed for matches that fit.</p>
+
+      <div class="form-group">
+        <label for="suName">Your name</label>
+        <input type="text" id="suName" placeholder="First and last name" autocomplete="name">
+      </div>
+      <div class="form-group">
+        <label for="suEmail">Email</label>
+        <input type="email" id="suEmail" placeholder="you@example.com" autocomplete="email" inputmode="email">
+        <p class="form-hint">We'll send one confirmation email to make sure this address works.</p>
+      </div>
+      <div class="form-group">
+        <label for="suPhone">Phone <span style="font-weight:400;color:#999;">(optional)</span></label>
+        <input type="tel" id="suPhone" placeholder="(205) 555-0123" autocomplete="tel">
+        <p class="form-hint">Only shown to captains, so they can text you if a match is same-day.</p>
+      </div>
+
+      <div class="form-group">
+        <label>Levels you'll play</label>
+        <div class="chip-grid" id="suLevels"></div>
+      </div>
+
+      <div class="form-group">
+        <label>Teams you'll sub for</label>
+        <div class="chip-grid" id="suTeams" style="flex-direction:column;"></div>
+      </div>
+
+      <button class="btn btn-primary" id="suSubmit" onclick="submitSignup()">Sign me up</button>
+    </div>
+  </div>
+
+  <!-- ══════════ VERIFY PENDING ══════════ -->
+  <div class="screen" id="verifyScreen">
+    <div class="card" style="text-align:center;">
+      <span style="font-size:44px;display:block;margin-bottom:10px;">📬</span>
+      <h2>Check your email</h2>
+      <p class="card-sub" style="margin-bottom:20px;">
+        We sent a confirmation link to <strong id="verifyEmail"></strong>.
+        Tap it and you're on the sub list — you won't get any match emails until you do.
+      </p>
+      <button class="btn btn-ghost" id="verifyBtn" onclick="afterVerify()">I've clicked it — continue</button>
+      <p class="form-hint" style="margin-top:12px;">Didn't arrive? Check spam, or fix your address on the Me tab.</p>
+    </div>
+  </div>
+
+  <!-- ══════════ MATCHES (sub view) ══════════ -->
+  <div class="screen" id="matchesScreen">
+    <div id="matchesList"></div>
+  </div>
+
+  <!-- ══════════ POST — step 1: match details ══════════ -->
+  <div class="screen" id="postScreen">
+    <div class="card">
+      <h2>Post a match</h2>
+      <p class="card-sub">Fill in the match, then you'll pick exactly who gets notified.</p>
+
+      <div class="form-group">
+        <label for="pTeam">Team</label>
+        <select id="pTeam" onchange="onPostTeamChange()"></select>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="pDate">Date</label>
+          <input type="date" id="pDate">
+        </div>
+        <div class="form-group">
+          <label for="pTime">Start time</label>
+          <input type="time" id="pTime">
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="pLocation">Location</label>
+        <input type="text" id="pLocation" placeholder="Inverness Country Club">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="pOpponent">Opponent <span style="font-weight:400;color:#999;">(optional)</span></label>
+          <input type="text" id="pOpponent" placeholder="Riverchase">
+        </div>
+        <div class="form-group">
+          <label for="pLine">Line</label>
+          <select id="pLine">
+            <option value="">Not specified</option>
+            <option>Line 1 Singles</option>
+            <option>Line 2 Singles</option>
+            <option>Line 1 Doubles</option>
+            <option>Line 2 Doubles</option>
+            <option>Line 3 Doubles</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="pLevel">Level needed</label>
+        <select id="pLevel"></select>
+        <p class="form-hint">Used to group the sub list on the next screen.</p>
+      </div>
+      <div class="form-group">
+        <label for="pNotes">Notes <span style="font-weight:400;color:#999;">(optional)</span></label>
+        <textarea id="pNotes" placeholder="Need a righty who can play the ad side. Match may run long."></textarea>
+      </div>
+
+      <button class="btn btn-primary" onclick="goToNotify()">Next: choose who to notify</button>
+    </div>
+  </div>
+
+  <!-- ══════════ POST — step 2: pick subs ══════════ -->
+  <div class="screen" id="notifyScreen">
+    <div class="card">
+      <h2>Who gets notified?</h2>
+      <p class="card-sub" id="notifySummary"></p>
+      <div class="notice notice-info">
+        Only the people you check will be emailed. If nobody claims it, we'll email you in 24 hours so you can widen the net.
+      </div>
+      <div id="subPicker"></div>
+    </div>
+    <div class="card">
+      <button class="btn btn-primary" id="notifyBtn" onclick="confirmNotify()" disabled>Select at least one sub</button>
+      <button class="btn btn-ghost" onclick="showScreen('postScreen')">← Back to match details</button>
+    </div>
+  </div>
+
+  <!-- ══════════ MY REQUESTS (captain) ══════════ -->
+  <div class="screen" id="requestsScreen">
+    <div id="requestsList"></div>
+  </div>
+
+  <!-- ══════════ CAPTAIN PIN GATE ══════════ -->
+  <div class="screen" id="captainPinScreen">
+    <div class="card">
+      <h2>Captain access</h2>
+      <p class="card-sub">
+        Enter the captain PIN to post matches and see the sub list. It keeps players'
+        phone numbers and emails from being readable by anyone with the app link.
+      </p>
+      <div class="form-group">
+        <label for="capPin">Captain PIN</label>
+        <input type="tel" id="capPin" inputmode="numeric" placeholder="••••" maxlength="8">
+      </div>
+      <div class="form-group">
+        <label for="capName">Which captain are you?</label>
+        <select id="capName"></select>
+        <p class="form-hint">Your name goes on the matches you post, so subs know who to ask.</p>
+      </div>
+      <button class="btn btn-primary" onclick="verifyCaptainPin()">Unlock captain tools</button>
+      <button class="btn btn-ghost" onclick="navigate('meScreen', document.getElementById('tabMe'))">Not a captain</button>
+    </div>
+  </div>
+
+  <!-- ══════════ SUB ROSTER ══════════ -->
+  <div class="screen" id="rosterScreen">
+    <div class="card">
+      <h2>Sub list</h2>
+      <p class="card-sub">Everyone who's signed up, and what they'll play. Most people add themselves — but you can add someone who won't install the app.</p>
+      <div class="form-group">
+        <label for="rosterFilter">Filter by team</label>
+        <select id="rosterFilter" onchange="renderRoster()"></select>
+      </div>
+      <button class="btn btn-outline" onclick="showAddSub()">+ Add a sub manually</button>
+    </div>
+    <div id="rosterList"></div>
+  </div>
+
+  <!-- ══════════ ADD SUB MANUALLY ══════════ -->
+  <div class="screen" id="addSubScreen">
+    <div class="card">
+      <h2>Add a sub</h2>
+      <p class="card-sub">
+        For someone who won't install the app. They go on the list right away, and get
+        one email telling them you added them and how to change their levels or opt out.
+      </p>
+      <div class="form-group">
+        <label for="asName">Their name</label>
+        <input type="text" id="asName" placeholder="First and last name">
+      </div>
+      <div class="form-group">
+        <label for="asEmail">Their email</label>
+        <input type="email" id="asEmail" placeholder="them@example.com" inputmode="email">
+        <p class="form-hint">Double-check this — a typo means they silently never hear from you.</p>
+      </div>
+      <div class="form-group">
+        <label for="asPhone">Their phone <span style="font-weight:400;color:#999;">(optional)</span></label>
+        <input type="tel" id="asPhone" placeholder="(205) 555-0123">
+      </div>
+      <div class="form-group">
+        <label>Levels they'll play</label>
+        <div class="chip-grid" id="asLevels"></div>
+      </div>
+      <div class="form-group">
+        <label>Teams they'll sub for</label>
+        <div class="chip-grid" id="asTeams" style="flex-direction:column;"></div>
+      </div>
+      <button class="btn btn-primary" onclick="submitAddSub()">Add &amp; notify them</button>
+      <button class="btn btn-ghost" onclick="navigate('rosterScreen', document.getElementById('tabRoster'))">Cancel</button>
+    </div>
+  </div>
+
+  <!-- ══════════ ME ══════════ -->
+  <div class="screen" id="meScreen">
+    <div id="meContent"></div>
+  </div>
+
+</div>
+
+<!-- ══════════ BOTTOM NAV ══════════ -->
+<div class="bottom-nav" id="bottomNav" style="display:none;">
+  <button class="nav-tab" id="tabMatches" onclick="navigate('matchesScreen', this)">
+    <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 2c1.6 0 3 .5 4.2 1.3A8 8 0 0113 9.9V4.1c-.3 0-.7-.1-1-.1zm-2 .3v5.6a8 8 0 01-3.2-4.3A8 8 0 0110 4.3zM4.6 7.5A10 10 0 009.4 12a10 10 0 00-4.8 4.5A8 8 0 014 12c0-1.6.2-3.2.6-4.5zm14.8 0c.4 1.3.6 2.9.6 4.5s-.2 3.2-.6 4.5A10 10 0 0014.6 12a10 10 0 004.8-4.5zM12 11a9 9 0 013 .4v1.2a9 9 0 01-6 0v-1.2a9 9 0 013-.4zm-1 3.1v5.8a8 8 0 01-4.2-1.3A8 8 0 0111 14.1zm2 0a8 8 0 014.2 4.5A8 8 0 0113 19.9v-5.8z"/></svg>
+    Matches<span class="nav-badge" id="matchesBadge" style="display:none;">0</span>
+  </button>
+  <button class="nav-tab" id="tabPost" onclick="navigate('postScreen', this)">
+    <svg viewBox="0 0 24 24"><path d="M12 5a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H6a1 1 0 110-2h5V6a1 1 0 011-1z"/></svg>
+    Post
+  </button>
+  <button class="nav-tab" id="tabRequests" onclick="navigate('requestsScreen', this)">
+    <svg viewBox="0 0 24 24"><path d="M4 5a2 2 0 012-2h12a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm4 3h8v2H8V8zm0 4h8v2H8v-2zm0 4h5v2H8v-2z"/></svg>
+    Requests
+  </button>
+  <button class="nav-tab" id="tabRoster" onclick="navigate('rosterScreen', this)">
+    <svg viewBox="0 0 24 24"><path d="M9 11a4 4 0 100-8 4 4 0 000 8zm0 2c-3.3 0-6 1.8-6 4v2h12v-2c0-2.2-2.7-4-6-4zm8-2a3 3 0 100-6 3 3 0 000 6zm0 2c-.7 0-1.4.1-2 .3 1.3 1 2 2.3 2 3.7v2h5v-2c0-2.2-2.4-4-5-4z"/></svg>
+    Subs
+  </button>
+  <button class="nav-tab" id="tabMe" onclick="navigate('meScreen', this)">
+    <svg viewBox="0 0 24 24"><path d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-4.4 0-8 2.5-8 5.5V21h16v-1.5c0-3-3.6-5.5-8-5.5z"/></svg>
+    Me
+  </button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div class="modal-backdrop" id="modalBackdrop">
+  <div class="modal">
+    <h3 id="modalTitle"></h3>
+    <p id="modalBody"></p>
+    <button class="btn btn-primary" id="modalConfirm">Confirm</button>
+    <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════
+   CONFIG
+   ═══════════════════════════════════════════════════════ */
+const APP_VERSION = 1; // must match VERSION in google-apps-script.js
+
+/*
+ * Paste the deployed Apps Script Web App URL here once it exists.
+ * While it's blank the app runs on sample data so the flow can be
+ * demoed without a backend.
+ */
+const DEFAULT_SCRIPT_URL = '';
+
+let API_URL = localStorage.getItem('matchSubUrl') || DEFAULT_SCRIPT_URL;
+const DEMO_MODE = !API_URL;
+
+const LEVELS = ['2.5', '3.0', '3.5', '4.0', '4.5', '5.0'];
+
+/*
+ * League rule: nobody may sub for the same team more than 3 times in a season.
+ * Counts are tracked per (sub, team) and are scoped to CURRENT_SEASON — rolling
+ * the season string forward starts everyone back at zero without erasing what
+ * they did last season.
+ *
+ * NOTE: this is the front-end guard. When the Apps Script backend is built it
+ * MUST re-check the cap on claim, because two subs can hit "I'll sub" at the
+ * same moment and a browser-side check can't stop that.
+ */
+const MAX_SUBS_PER_TEAM = 3;
+const CURRENT_SEASON = '2026 Summer';
+
+/* ═══════════════════════════════════════════════════════
+   LOCAL STATE
+   ═══════════════════════════════════════════════════════ */
+let me = JSON.parse(localStorage.getItem('matchSubMe') || 'null') || {
+  name: '', email: '', phone: '', role: '', levels: [], teams: [],
+  verified: false, subId: '', pin: ''
+};
+
+let draft = null;          // in-progress match request
+let pickedSubs = [];       // sub IDs checked on the notify screen
+let notifyMode = 'new';    // 'new' = posting, 'more' = widening an existing post
+let dataLoaded = false;
+
+/* ═══════════════════════════════════════════════════════
+   DEMO DATA  (replaced by the Google Sheet once wired up)
+   ═══════════════════════════════════════════════════════ */
+let TEAMS = [
+  { id: 't1', name: 'ICC Ladies 3.5 — Thursday', level: '3.5', captain: 'Lisa Hardy',   captainEmail: 'lisa@example.com' },
+  { id: 't2', name: 'ICC Ladies 4.0 — Thursday', level: '4.0', captain: 'Anne Powell',  captainEmail: 'anne@example.com' },
+  { id: 't3', name: "ICC Men's 3.5 — Sunday",    level: '3.5', captain: 'Mark Ellis',   captainEmail: 'mark@example.com' },
+  { id: 't4', name: "ICC Men's 4.0 — Sunday",    level: '4.0', captain: 'J.C. Freeman', captainEmail: 'jc@example.com' },
+  { id: 't5', name: 'ICC Mixed 8.0 — Saturday',  level: '4.0', captain: 'Dana Cole',    captainEmail: 'dana@example.com' }
+];
+
+// teamSubs = how many times this person has already subbed for each team this
+// season. Three for any one team means they're done for that team.
+let SUBS = [
+  { id:'s1', name:'Sarah Jones',   email:'sarah@example.com',  phone:'(205) 555-0142', levels:['4.0','4.5'], teams:['t2','t5'], season:CURRENT_SEASON, teamSubs:{ t2:3 },       lastSub:'2026-06-12', verified:true },
+  { id:'s2', name:'Meg Taylor',    email:'meg@example.com',    phone:'',               levels:['4.0'],       teams:['t2'],      season:CURRENT_SEASON, teamSubs:{},             lastSub:'',           verified:true },
+  { id:'s3', name:'Kim Alvarez',   email:'kim@example.com',    phone:'(205) 555-0177', levels:['3.5','4.0'], teams:['t1','t2'], season:CURRENT_SEASON, teamSubs:{ t2:1 },       lastSub:'2026-05-02', verified:true },
+  { id:'s4', name:'Beth Nguyen',   email:'beth@example.com',   phone:'',               levels:['3.5'],       teams:['t1'],      season:CURRENT_SEASON, teamSubs:{ t1:3 },       lastSub:'2026-07-10', verified:true },
+  { id:'s5', name:'Tom Baxter',    email:'tom@example.com',    phone:'(205) 555-0190', levels:['4.0','4.5'], teams:['t4','t5'], season:CURRENT_SEASON, teamSubs:{ t4:1, t5:1 }, lastSub:'2026-06-28', verified:true },
+  { id:'s6', name:'Chris Doyle',   email:'chris@example.com',  phone:'',               levels:['3.5','4.0'], teams:['t3','t4'], season:CURRENT_SEASON, teamSubs:{},             lastSub:'',           verified:true },
+  { id:'s7', name:'Raj Patel',     email:'raj@example.com',    phone:'(205) 555-0155', levels:['4.0'],       teams:['t4'],      season:CURRENT_SEASON, teamSubs:{ t4:3 },       lastSub:'2026-07-01', verified:true },
+  { id:'s8', name:'Dana Cole',     email:'dana@example.com',   phone:'',               levels:['4.0'],       teams:['t5'],      season:CURRENT_SEASON, teamSubs:{ t5:1 },       lastSub:'2026-04-19', verified:true },
+  { id:'s9', name:'Pat Rivers',    email:'pat@example.com',    phone:'',               levels:['3.0','3.5'], teams:['t1','t3'], season:CURRENT_SEASON, teamSubs:{ t1:2 },       lastSub:'2026-06-05', verified:true }
+];
+
+let REQUESTS = [
+  {
+    id:'r1', teamId:'t2', level:'4.0', date:'2026-07-30', time:'18:00',
+    location:'Inverness Country Club', opponent:'Riverchase', line:'Line 2 Doubles',
+    notes:'Prefer someone comfortable at the net. Match should wrap by 8.',
+    postedBy:'Anne Powell', postedAt:'2026-07-24T09:12:00',
+    notified:['s1','s2','s3'], status:'open', claimedBy:'', claimedAt:''
+  },
+  {
+    id:'r2', teamId:'t4', level:'4.0', date:'2026-07-27', time:'14:00',
+    location:'Hoover Country Club', opponent:'Greystone', line:'Line 1 Singles',
+    notes:'', postedBy:'J.C. Freeman', postedAt:'2026-07-22T16:40:00',
+    notified:['s5','s7'], status:'filled', claimedBy:'s5', claimedAt:'2026-07-22T19:03:00'
+  },
+  {
+    id:'r3', teamId:'t1', level:'3.5', date:'2026-08-06', time:'09:30',
+    location:'Inverness Country Club', opponent:'Vestavia', line:'Line 3 Doubles',
+    notes:'Early start — courts are booked at 11.',
+    postedBy:'Lisa Hardy', postedAt:'2026-07-23T20:15:00',
+    notified:['s4','s9'], status:'open', claimedBy:'', claimedAt:''
+  }
+];
+
+/* ═══════════════════════════════════════════════════════
+   HELPERS
+   ═══════════════════════════════════════════════════════ */
+function teamById(id) { return TEAMS.find(t => t.id === id) || { name:'Unknown team', level:'', captain:'' }; }
+function subById(id)  { return SUBS.find(s => s.id === id)  || { name:'Unknown', levels:[], teams:[] }; }
+
+/* ── Per-team sub counts (the 3-per-season rule) ──────────── */
+
+// A sub's counts only apply to the current season. Last season's numbers stay
+// on the record but read as zero, so nobody starts a new season maxed out.
+function seasonCounts(s) {
+  if (!s || !s.teamSubs || s.season !== CURRENT_SEASON) return {};
+  return s.teamSubs;
+}
+
+function teamSubCount(s, teamId) {
+  return seasonCounts(s)[teamId] || 0;
+}
+
+function totalSubCount(s) {
+  const c = seasonCounts(s);
+  return Object.keys(c).reduce((sum, k) => sum + c[k], 0);
+}
+
+function isMaxedFor(s, teamId) {
+  return teamSubCount(s, teamId) >= MAX_SUBS_PER_TEAM;
+}
+
+function subsLeftFor(s, teamId) {
+  return Math.max(0, MAX_SUBS_PER_TEAM - teamSubCount(s, teamId));
+}
+
+// Adjusts a sub's count for one team. Rolls the record onto the current season
+// first, so a stale season never gets incremented.
+function bumpTeamSub(s, teamId, delta) {
+  if (!s || !teamId) return;
+  if (s.season !== CURRENT_SEASON) { s.season = CURRENT_SEASON; s.teamSubs = {}; }
+  if (!s.teamSubs) s.teamSubs = {};
+  const next = (s.teamSubs[teamId] || 0) + delta;
+  if (next > 0) s.teamSubs[teamId] = next;
+  else delete s.teamSubs[teamId];
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+    { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]
+  ));
+}
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' });
+}
+
+function fmtTime(t) {
+  if (!t) return '';
+  const [h, m] = t.split(':').map(Number);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const hr = h % 12 === 0 ? 12 : h % 12;
+  return hr + ':' + String(m).padStart(2, '0') + ' ' + ampm;
+}
+
+function daysUntil(iso) {
+  if (!iso) return 999;
+  const [y, m, d] = iso.split('-').map(Number);
+  const target = new Date(y, m - 1, d);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((target - today) / 86400000);
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+function showModal(title, body, confirmLabel, onConfirm) {
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalBody').textContent = body;
+  const btn = document.getElementById('modalConfirm');
+  btn.textContent = confirmLabel;
+  btn.onclick = () => { closeModal(); onConfirm(); };
+  document.getElementById('modalBackdrop').classList.add('show');
+}
+function closeModal() { document.getElementById('modalBackdrop').classList.remove('show'); }
+
+function saveMe() { localStorage.setItem('matchSubMe', JSON.stringify(me)); }
+
+/* ═══════════════════════════════════════════════════════
+   API  (no-ops in demo mode — the arrays above are the data)
+   ═══════════════════════════════════════════════════════ */
+async function fetchAPI(action, params) {
+  let url = API_URL + '?action=' + encodeURIComponent(action);
+  const all = params || {};
+  for (const key in all) {
+    if (all[key] !== undefined && all[key] !== '') {
+      url += '&' + encodeURIComponent(key) + '=' + encodeURIComponent(all[key]);
+    }
+  }
+  const resp = await fetch(url);
+  return await resp.json();
+}
+
+async function postAPI(data) {
+  if (me.pin) data.pin = me.pin;
+  try {
+    const resp = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify(data)
+    });
+    return await resp.json();
+  } catch (e) {
+    // Some setups block reading the response. Fire blind, wait for the
+    // write to land, then reload so the UI reflects the real state.
+    try {
+      await fetch(API_URL, {
+        method: 'POST', mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify(data)
+      });
+    } catch (e2) {
+      return { status: 'error', message: 'No connection — check your signal and try again.' };
+    }
+    await new Promise(r => setTimeout(r, 1400));
+    return { status: 'ok', blind: true };
+  }
+}
+
+/** Pulls Teams / Subs / Requests from the sheet. Cached until something changes. */
+async function ensureData(force) {
+  if (DEMO_MODE) { dataLoaded = true; return true; }
+  if (dataLoaded && !force) return true;
+  try {
+    const resp = await fetchAPI('getData', { pin: me.pin });
+    if (resp.status !== 'ok') throw new Error(resp.message || 'Could not load data');
+    TEAMS = resp.teams || [];
+    SUBS = resp.subs || [];
+    REQUESTS = resp.requests || [];
+    dataLoaded = true;
+    return true;
+  } catch (err) {
+    showToast('Could not reach the sheet — pull down to retry');
+    return false;
+  }
+}
+
+function showLoading(containerId) {
+  const el = document.getElementById(containerId);
+  if (el) el.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+}
+
+/* ═══════════════════════════════════════════════════════
+   NAVIGATION
+   ═══════════════════════════════════════════════════════ */
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  window.scrollTo(0, 0);
+}
+
+async function navigate(screenId, tabEl) {
+  // Captain screens are gated behind the PIN.
+  const gated = ['postScreen', 'requestsScreen', 'rosterScreen', 'addSubScreen'];
+  if (gated.indexOf(screenId) !== -1 && !DEMO_MODE && !me.pin) {
+    showScreen('captainPinScreen');
+    document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+    if (tabEl) tabEl.classList.add('active');
+    buildCaptainPicker();
+    return;
+  }
+
+  showScreen(screenId);
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  if (tabEl) tabEl.classList.add('active');
+
+  if (screenId === 'matchesScreen')       showLoading('matchesList');
+  else if (screenId === 'requestsScreen') showLoading('requestsList');
+  else if (screenId === 'rosterScreen')   showLoading('rosterList');
+
+  await ensureData();
+  updateChrome();
+
+  if (screenId === 'matchesScreen')       renderMatches();
+  else if (screenId === 'postScreen')     initPostForm();
+  else if (screenId === 'requestsScreen') renderRequests();
+  else if (screenId === 'rosterScreen')   { initRosterFilter(); renderRoster(); }
+  else if (screenId === 'meScreen')       renderMe();
+}
+
+function updateChrome() {
+  const isCaptain = me.role === 'captain';
+  document.getElementById('tabPost').style.display     = isCaptain ? '' : 'none';
+  document.getElementById('tabRequests').style.display = isCaptain ? '' : 'none';
+  document.getElementById('tabRoster').style.display   = isCaptain ? '' : 'none';
+
+  const badge = document.getElementById('userBadge');
+  if (!me.name) {
+    badge.textContent = 'Not set up';
+  } else {
+    badge.textContent = me.name + (isCaptain ? ' · Captain' : (me.verified ? ' · Sub' : ' · Unconfirmed'));
+  }
+
+  // Matches badge = open requests I was notified about and haven't claimed
+  const mySubId = mySubRecordId();
+  const count = REQUESTS.filter(r =>
+    r.status === 'open' && mySubId && r.notified.indexOf(mySubId) !== -1
+  ).length;
+  const nb = document.getElementById('matchesBadge');
+  nb.style.display = count > 0 ? '' : 'none';
+  nb.textContent = count;
+}
+
+function mySubRecordId() {
+  // Live mode hides other people's emails, so trust the id the server gave
+  // us at signup and only fall back to matching on email.
+  if (me.subId && SUBS.some(s => s.id === me.subId)) return me.subId;
+  if (!me.email) return null;
+  const found = SUBS.find(s => s.email && s.email.toLowerCase() === me.email.toLowerCase());
+  return found ? found.id : null;
+}
+
+/* ═══════════════════════════════════════════════════════
+   SETUP / SIGNUP
+   ═══════════════════════════════════════════════════════ */
+async function chooseRole(role) {
+  me.role = role;
+  saveMe();
+  await ensureData();
+
+  if (role === 'sub') {
+    buildSignupPickers();
+    showScreen('signupScreen');
+  } else {
+    document.getElementById('bottomNav').style.display = 'flex';
+    updateChrome();
+    navigate('postScreen', document.getElementById('tabPost'));
+  }
+}
+
+/* ─── Captain PIN gate ─────────────────────────────── */
+function buildCaptainPicker() {
+  const sel = document.getElementById('capName');
+  const names = [];
+  TEAMS.forEach(t => { if (t.captain && names.indexOf(t.captain) === -1) names.push(t.captain); });
+  sel.innerHTML = names.map(n => '<option>' + esc(n) + '</option>').join('') +
+                  '<option value="__other">Someone else</option>';
+  if (me.name && names.indexOf(me.name) !== -1) sel.value = me.name;
+}
+
+async function verifyCaptainPin() {
+  const pin = document.getElementById('capPin').value.trim();
+  const who = document.getElementById('capName').value;
+  if (!pin) return showToast('Enter the captain PIN');
+
+  const resp = await fetchAPI('getData', { pin: pin });
+  if (resp.status !== 'ok' || !resp.captain) {
+    return showToast('That PIN is not right');
+  }
+
+  me.pin = pin;
+  if (who && who !== '__other') me.name = who;
+  me.role = 'captain';
+  saveMe();
+
+  TEAMS = resp.teams || [];
+  SUBS = resp.subs || [];
+  REQUESTS = resp.requests || [];
+  dataLoaded = true;
+
+  document.getElementById('capPin').value = '';
+  updateChrome();
+  navigate('postScreen', document.getElementById('tabPost'));
+  showToast('Captain tools unlocked');
+}
+
+function buildSignupPickers() {
+  const lvlBox = document.getElementById('suLevels');
+  lvlBox.innerHTML = LEVELS.map(l =>
+    '<button type="button" class="chip' + (me.levels.indexOf(l) !== -1 ? ' selected' : '') +
+    '" data-level="' + l + '" onclick="toggleChip(this,\'level\')">' + l + '</button>'
+  ).join('');
+
+  const teamBox = document.getElementById('suTeams');
+  teamBox.innerHTML = TEAMS.map(t =>
+    '<button type="button" class="chip chip-wide' + (me.teams.indexOf(t.id) !== -1 ? ' selected' : '') +
+    '" data-team="' + t.id + '" onclick="toggleChip(this,\'team\')">' + esc(t.name) + '</button>'
+  ).join('');
+
+  document.getElementById('suName').value  = me.name;
+  document.getElementById('suEmail').value = me.email;
+  document.getElementById('suPhone').value = me.phone;
+}
+
+function toggleChip(el, kind) {
+  el.classList.toggle('selected');
+  if (kind === 'level') {
+    const v = el.dataset.level;
+    const i = me.levels.indexOf(v);
+    if (i === -1) me.levels.push(v); else me.levels.splice(i, 1);
+  } else {
+    const v = el.dataset.team;
+    const i = me.teams.indexOf(v);
+    if (i === -1) me.teams.push(v); else me.teams.splice(i, 1);
+  }
+}
+
+async function submitSignup() {
+  const name  = document.getElementById('suName').value.trim();
+  const email = document.getElementById('suEmail').value.trim();
+  const phone = document.getElementById('suPhone').value.trim();
+
+  if (!name)  return showToast('Add your name');
+  if (!email || email.indexOf('@') === -1 || email.indexOf('.') === -1) return showToast('Check your email address');
+  if (me.levels.length === 0) return showToast('Pick at least one level');
+  if (me.teams.length === 0)  return showToast('Pick at least one team');
+
+  me.name = name; me.email = email; me.phone = phone;
+  saveMe();
+
+  document.getElementById('verifyEmail').textContent = email;
+
+  if (DEMO_MODE) {
+    me.verified = false;
+    saveMe();
+    showScreen('verifyScreen');
+    document.getElementById('bottomNav').style.display = 'none';
+    return;
+  }
+
+  const btn = document.getElementById('suSubmit');
+  btn.disabled = true; btn.textContent = 'Signing you up…';
+
+  const resp = await postAPI({
+    action: 'signup', name: name, email: email, phone: phone,
+    levels: me.levels, teams: me.teams
+  });
+
+  btn.disabled = false; btn.textContent = 'Sign me up';
+
+  if (resp.status !== 'ok') return showToast(resp.message || 'Signup failed — try again');
+
+  if (resp.subId) me.subId = resp.subId;
+  me.verified = !!resp.verified;
+  saveMe();
+  dataLoaded = false;
+
+  if (me.verified) {
+    document.getElementById('bottomNav').style.display = 'flex';
+    navigate('matchesScreen', document.getElementById('tabMatches'));
+    showToast('Profile updated');
+  } else {
+    showScreen('verifyScreen');
+    document.getElementById('bottomNav').style.display = 'none';
+  }
+}
+
+/** After the user says they clicked the confirmation link. */
+async function afterVerify() {
+  if (DEMO_MODE) return demoConfirm();
+
+  dataLoaded = false;
+  await ensureData(true);
+
+  const rec = SUBS.find(s => s.id === me.subId);
+  if (!rec || !rec.verified) {
+    return showToast("Not confirmed yet — check your inbox for the link");
+  }
+
+  me.verified = true;
+  me.levels = rec.levels.slice();
+  me.teams = rec.teams.slice();
+  saveMe();
+
+  document.getElementById('bottomNav').style.display = 'flex';
+  updateChrome();
+  navigate('matchesScreen', document.getElementById('tabMatches'));
+  showToast("You're on the sub list");
+}
+
+function demoConfirm() {
+  me.verified = true;
+  saveMe();
+
+  // Add (or update) the demo roster so the rest of the app has something to show
+  const existing = SUBS.find(s => s.email.toLowerCase() === me.email.toLowerCase());
+  if (existing) {
+    existing.name = me.name; existing.levels = me.levels.slice();
+    existing.teams = me.teams.slice(); existing.verified = true;
+  } else {
+    SUBS.push({
+      id: 'me', name: me.name, email: me.email, phone: me.phone,
+      levels: me.levels.slice(), teams: me.teams.slice(),
+      season: CURRENT_SEASON, teamSubs: {}, lastSub: '', verified: true
+    });
+    // Pretend a captain already had an open match that fits
+    const fit = REQUESTS.find(r => r.status === 'open' && me.levels.indexOf(r.level) !== -1);
+    if (fit && fit.notified.indexOf('me') === -1) fit.notified.push('me');
+  }
+
+  document.getElementById('bottomNav').style.display = 'flex';
+  updateChrome();
+  navigate('matchesScreen', document.getElementById('tabMatches'));
+  showToast("You're on the sub list");
+}
+
+/* ═══════════════════════════════════════════════════════
+   MATCHES  (sub view)
+   ═══════════════════════════════════════════════════════ */
+function renderMatches() {
+  const box = document.getElementById('matchesList');
+  const mySubId = mySubRecordId();
+
+  if (!mySubId) {
+    box.innerHTML = '<div class="card"><div class="empty">' +
+      '<span class="empty-icon">🎾</span>' +
+      "You're not on the sub list yet.<br>Head to the Me tab to sign up." +
+      '</div></div>';
+    return;
+  }
+
+  const hidden = dismissedIds();
+  const mine = REQUESTS
+    .filter(r => r.notified.indexOf(mySubId) !== -1)
+    .filter(r => r.status !== 'cancelled')
+    .filter(r => r.claimedBy === mySubId || hidden.indexOf(r.id) === -1)
+    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+
+  if (mine.length === 0) {
+    box.innerHTML = '<div class="card"><div class="empty">' +
+      '<span class="empty-icon">✅</span>' +
+      "Nothing right now.<br>You'll get an email the moment a captain needs you." +
+      '</div></div>';
+    return;
+  }
+
+  box.innerHTML = mine.map(r => matchCardHTML(r, mySubId)).join('');
+}
+
+function matchCardHTML(r, mySubId) {
+  const team = teamById(r.teamId);
+  const days = daysUntil(r.date);
+  const urgent = r.status === 'open' && days <= 2;
+  const iClaimed = r.claimedBy === mySubId;
+
+  let statusBadge = '';
+  if (r.status === 'filled') {
+    statusBadge = iClaimed
+      ? '<span class="badge badge-filled">You\'re in</span>'
+      : '<span class="badge badge-yours">Filled</span>';
+  } else if (urgent) {
+    statusBadge = '<span class="badge badge-urgent">' + (days <= 0 ? 'Today' : days + ' day' + (days === 1 ? '' : 's')) + '</span>';
+  }
+
+  let actions = '';
+  if (r.status === 'open') {
+    actions = '<div class="match-actions">' +
+      '<button class="btn btn-claim btn-small" onclick="claimMatch(\'' + r.id + '\')">I\'ll sub</button>' +
+      '<button class="btn btn-ghost btn-small" onclick="passMatch(\'' + r.id + '\')">Can\'t make it</button>' +
+      '</div>';
+  } else if (iClaimed) {
+    actions = '<div class="match-actions">' +
+      '<button class="btn btn-ghost btn-small" onclick="withdrawMatch(\'' + r.id + '\')">I can no longer play</button>' +
+      '</div>';
+  }
+
+  return '<div class="card match-card">' +
+    '<div class="match-team">' + esc(team.name) +
+      '<span class="badge badge-level">' + esc(r.level) + '</span>' + statusBadge +
+    '</div>' +
+    '<div class="match-when">' + fmtDate(r.date) + ' at ' + fmtTime(r.time) + '</div>' +
+    '<div class="match-meta">' +
+      esc(r.location) +
+      (r.opponent ? ' · vs ' + esc(r.opponent) : '') +
+      (r.line ? '<br>' + esc(r.line) : '') +
+      '<br>Posted by ' + esc(r.postedBy) +
+    '</div>' +
+    (r.notes ? '<div class="match-notes">' + esc(r.notes) + '</div>' : '') +
+    (r.status === 'filled' && !iClaimed
+      ? '<div class="match-meta" style="margin-top:10px;">' + esc(subById(r.claimedBy).name) + ' picked this one up.</div>'
+      : '') +
+    actions +
+  '</div>';
+}
+
+function claimMatch(id) {
+  const r = REQUESTS.find(x => x.id === id);
+  if (!r) return;
+  const team = teamById(r.teamId);
+
+  // Last line of defence: someone can be notified while they still have room,
+  // then take a different match for the same team before opening this one.
+  const meRec = subById(mySubRecordId());
+  if (isMaxedFor(meRec, r.teamId)) {
+    showModal(
+      'You\'ve maxed out for this team',
+      'League rules cap each sub at ' + MAX_SUBS_PER_TEAM + ' matches per team per season, and you\'ve already played ' +
+      MAX_SUBS_PER_TEAM + ' for ' + team.name + ' this season. ' +
+      'You can still sub for any other team.',
+      'Got it',
+      () => closeModal()
+    );
+    return;
+  }
+
+  showModal(
+    'Confirm you can play',
+    'You\'re committing to ' + team.name + ' on ' + fmtDate(r.date) + ' at ' + fmtTime(r.time) +
+    ' at ' + r.location + '. ' + r.postedBy + ' will be notified right away.',
+    "Yes, I'll sub",
+    async () => {
+      if (DEMO_MODE) {
+        if (r.status !== 'open') { showToast('Someone just beat you to it'); renderMatches(); return; }
+        r.status = 'filled';
+        r.claimedBy = mySubRecordId();
+        r.claimedAt = new Date().toISOString();
+        const s = subById(r.claimedBy);
+        if (s) { bumpTeamSub(s, r.teamId, 1); s.lastSub = r.date; }
+        renderMatches();
+        updateChrome();
+        showToast(r.postedBy + ' has been notified');
+        return;
+      }
+
+      showLoading('matchesList');
+      const resp = await postAPI({ action: 'claim', id: r.id, subId: mySubRecordId() });
+      await ensureData(true);
+      renderMatches();
+      updateChrome();
+      showToast(resp.status === 'ok'
+        ? r.postedBy + ' has been notified'
+        : (resp.message || 'Could not claim it'));
+    }
+  );
+}
+
+/**
+ * "Can't make it" only hides the card on this phone — the captain still sees
+ * you as notified, and can still call you if they get desperate.
+ */
+function dismissedIds() {
+  try { return JSON.parse(localStorage.getItem('matchSubDismissed') || '[]'); }
+  catch (e) { return []; }
+}
+
+function passMatch(id) {
+  const list = dismissedIds();
+  if (list.indexOf(id) === -1) list.push(id);
+  localStorage.setItem('matchSubDismissed', JSON.stringify(list));
+  renderMatches();
+  updateChrome();
+  showToast('Hidden — the captain can still reach you');
+}
+
+function withdrawMatch(id) {
+  const r = REQUESTS.find(x => x.id === id);
+  if (!r) return;
+  showModal(
+    'Back out of this match?',
+    'The captain will be emailed immediately and the spot reopens for the other subs they notified.',
+    'Yes, back out',
+    async () => {
+      if (DEMO_MODE) {
+        const s = subById(r.claimedBy);
+        // Backing out frees the slot back up against their team cap.
+        bumpTeamSub(s, r.teamId, -1);
+        r.status = 'open'; r.claimedBy = ''; r.claimedAt = '';
+        renderMatches();
+        updateChrome();
+        showToast('Captain notified — spot reopened');
+        return;
+      }
+
+      showLoading('matchesList');
+      const resp = await postAPI({ action: 'withdraw', id: r.id, subId: mySubRecordId() });
+      await ensureData(true);
+      renderMatches();
+      updateChrome();
+      showToast(resp.status === 'ok' ? 'Captain notified — spot reopened' : (resp.message || 'Could not back out'));
+    }
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   POST — step 1
+   ═══════════════════════════════════════════════════════ */
+function initPostForm() {
+  const sel = document.getElementById('pTeam');
+  const prev = sel.value;
+
+  // Show this captain's own teams first, but never hide the rest —
+  // co-captains and fill-ins still need to post.
+  const mine = me.name ? TEAMS.filter(t => t.captain === me.name) : [];
+  const rest = TEAMS.filter(t => mine.indexOf(t) === -1);
+  const optHtml = t => '<option value="' + t.id + '">' + esc(t.name) + '</option>';
+
+  sel.innerHTML = mine.length
+    ? '<optgroup label="Your teams">' + mine.map(optHtml).join('') + '</optgroup>' +
+      (rest.length ? '<optgroup label="Other teams">' + rest.map(optHtml).join('') + '</optgroup>' : '')
+    : TEAMS.map(optHtml).join('');
+  if (prev) sel.value = prev;
+
+  const lvl = document.getElementById('pLevel');
+  if (!lvl.options.length) {
+    lvl.innerHTML = LEVELS.map(l => '<option value="' + l + '">' + l + '</option>').join('');
+  }
+  if (!document.getElementById('pLocation').value) {
+    document.getElementById('pLocation').value = 'Inverness Country Club';
+  }
+  onPostTeamChange();
+}
+
+function onPostTeamChange() {
+  const t = teamById(document.getElementById('pTeam').value);
+  if (t.level) document.getElementById('pLevel').value = t.level;
+}
+
+function goToNotify() {
+  const teamId = document.getElementById('pTeam').value;
+  const date   = document.getElementById('pDate').value;
+  const time   = document.getElementById('pTime').value;
+  const loc    = document.getElementById('pLocation').value.trim();
+
+  if (!date) return showToast('Pick a match date');
+  if (!time) return showToast('Pick a start time');
+  if (!loc)  return showToast('Add a location');
+  if (daysUntil(date) < 0) return showToast("That date's already passed");
+
+  notifyMode = 'new';
+  draft = {
+    teamId: teamId,
+    level:    document.getElementById('pLevel').value,
+    date: date, time: time, location: loc,
+    opponent: document.getElementById('pOpponent').value.trim(),
+    line:     document.getElementById('pLine').value,
+    notes:    document.getElementById('pNotes').value.trim()
+  };
+  pickedSubs = [];
+
+  const team = teamById(teamId);
+  document.getElementById('notifySummary').textContent =
+    team.name + ' · ' + fmtDate(date) + ' at ' + fmtTime(time) + ' · ' + draft.level;
+
+  renderSubPicker();
+  showScreen('notifyScreen');
+}
+
+/* ═══════════════════════════════════════════════════════
+   POST — step 2: the sub picker
+   ═══════════════════════════════════════════════════════ */
+function eligibleSubs() {
+  // Anyone verified who plays this level. Subs who explicitly listed this
+  // team sort first — they're the most likely yes.
+  return SUBS
+    .filter(s => s.verified && s.levels.indexOf(draft.level) !== -1)
+    .sort((a, b) => {
+      const aOn = a.teams.indexOf(draft.teamId) !== -1 ? 0 : 1;
+      const bOn = b.teams.indexOf(draft.teamId) !== -1 ? 0 : 1;
+      if (aOn !== bOn) return aOn - bOn;
+      // Spread the load across whoever still has room on this team.
+      const aCount = teamSubCount(a, draft.teamId);
+      const bCount = teamSubCount(b, draft.teamId);
+      if (aCount !== bCount) return aCount - bCount;
+      return a.name.localeCompare(b.name);
+    });
+}
+
+function renderSubPicker() {
+  const box = document.getElementById('subPicker');
+  const list = eligibleSubs();
+
+  if (list.length === 0) {
+    box.innerHTML = '<div class="empty"><span class="empty-icon">🤷</span>' +
+      'Nobody has signed up to play ' + esc(draft.level) + ' yet.<br>' +
+      'Share the app link so people can add themselves.</div>';
+    document.getElementById('notifyBtn').disabled = true;
+    return;
+  }
+
+  // Anyone who has already subbed 3× for this team is shown but locked — a
+  // captain hunting for a specific name needs to see why they can't pick them,
+  // not just find them missing.
+  const maxed   = list.filter(s => isMaxedFor(s, draft.teamId));
+  const usable  = list.filter(s => !isMaxedFor(s, draft.teamId));
+  const onList  = usable.filter(s => s.teams.indexOf(draft.teamId) !== -1);
+  const offList = usable.filter(s => s.teams.indexOf(draft.teamId) === -1);
+  const teamName = teamById(draft.teamId).name;
+
+  let html = '';
+  if (onList.length) {
+    html += '<div class="level-group">' +
+      '<div class="level-head">' +
+        '<span class="lvl">On this team\'s list <small>(' + onList.length + ')</small></span>' +
+        '<button class="link-btn" onclick="selectGroup(\'on\')">Select all</button>' +
+      '</div>' +
+      onList.map(subRowHTML).join('') +
+    '</div>';
+  }
+  if (offList.length) {
+    html += '<div class="level-group">' +
+      '<div class="level-head">' +
+        '<span class="lvl">Other ' + esc(draft.level) + ' players <small>(' + offList.length + ')</small></span>' +
+        '<button class="link-btn" onclick="selectGroup(\'off\')">Select all</button>' +
+      '</div>' +
+      '<p class="form-hint" style="margin:-4px 0 8px;">These folks play ' + esc(draft.level) +
+      " but didn't list " + esc(teamName) + '. Worth a shot if the first group passes.</p>' +
+      offList.map(subRowHTML).join('') +
+    '</div>';
+  }
+  if (maxed.length) {
+    html += '<div class="level-group">' +
+      '<div class="level-head">' +
+        '<span class="lvl">Maxed out for this team <small>(' + maxed.length + ')</small></span>' +
+      '</div>' +
+      '<p class="form-hint" style="margin:-4px 0 8px;">Already subbed ' + MAX_SUBS_PER_TEAM +
+      '× for ' + esc(teamName) + ' this season, so they can\'t be picked again until ' +
+      'next season. They\'re still available for other teams.</p>' +
+      maxed.map(subRowHTML).join('') +
+    '</div>';
+  }
+
+  if (!onList.length && !offList.length) {
+    html += '<div class="empty" style="padding:18px 0;">' +
+      'Everyone who plays ' + esc(draft.level) + ' has already maxed out for this team. ' +
+      'Ask the league about an exception, or add a new sub below.</div>';
+  }
+
+  box.innerHTML = html;
+  updateNotifyBtn();
+}
+
+function subRowHTML(s) {
+  const selected = pickedSubs.indexOf(s.id) !== -1;
+  const onList = s.teams.indexOf(draft.teamId) !== -1;
+  const already = notifyMode === 'more' &&
+                  (draft.alreadyNotified || []).indexOf(s.id) !== -1;
+  const used = teamSubCount(s, draft.teamId);
+  const maxed = isMaxedFor(s, draft.teamId);
+
+  // History is stated against *this* team — a season total would be misleading
+  // when the cap is per team.
+  const history = maxed
+    ? 'Used all ' + MAX_SUBS_PER_TEAM + ' subs for this team this season'
+    : used === 0
+      ? 'Not yet subbed for this team'
+      : used + ' of ' + MAX_SUBS_PER_TEAM + ' used for this team' +
+        (s.lastSub ? ' · last ' + fmtDate(s.lastSub) : '');
+
+  const locked = maxed || already;
+
+  return '<div class="sub-row' + (selected && !maxed ? ' selected' : '') + '"' +
+      (locked ? ' style="opacity:.55;"' : ' onclick="toggleSub(\'' + s.id + '\')"') + '>' +
+    '<div class="sub-check">' + (maxed ? '🚫' : (selected ? '✓' : '')) + '</div>' +
+    '<div class="sub-info">' +
+      '<div class="sub-name">' + esc(s.name) +
+        (onList && !maxed ? ' <span class="badge badge-onlist">On list</span>' : '') +
+        (maxed ? ' <span class="badge badge-maxed">Maxed out</span>' : '') +
+        (already ? ' <span class="badge badge-yours">Already emailed</span>' : '') +
+      '</div>' +
+      '<div class="sub-detail">' + s.levels.join(', ') + ' · ' + history + '</div>' +
+    '</div>' +
+  '</div>';
+}
+
+function toggleSub(id) {
+  const i = pickedSubs.indexOf(id);
+  if (i === -1) pickedSubs.push(id); else pickedSubs.splice(i, 1);
+  renderSubPicker();
+}
+
+function selectGroup(which) {
+  const already = (notifyMode === 'more' && draft.alreadyNotified) || [];
+  const list = eligibleSubs()
+    .filter(s => which === 'on' ? s.teams.indexOf(draft.teamId) !== -1 : s.teams.indexOf(draft.teamId) === -1)
+    .filter(s => already.indexOf(s.id) === -1);
+  if (list.length === 0) return;
+  const allIn = list.every(s => pickedSubs.indexOf(s.id) !== -1);
+  list.forEach(s => {
+    const i = pickedSubs.indexOf(s.id);
+    if (allIn && i !== -1) pickedSubs.splice(i, 1);
+    else if (!allIn && i === -1) pickedSubs.push(s.id);
+  });
+  renderSubPicker();
+}
+
+function updateNotifyBtn() {
+  const btn = document.getElementById('notifyBtn');
+
+  if (notifyMode === 'more') {
+    const already = (draft && draft.alreadyNotified) || [];
+    const added = pickedSubs.filter(id => already.indexOf(id) === -1).length;
+    btn.disabled = added === 0;
+    btn.textContent = added === 0
+      ? 'Check someone new to notify'
+      : 'Email ' + added + ' more sub' + (added === 1 ? '' : 's');
+    return;
+  }
+
+  btn.disabled = pickedSubs.length === 0;
+  btn.textContent = pickedSubs.length === 0
+    ? 'Select at least one sub'
+    : 'Post & email ' + pickedSubs.length + ' sub' + (pickedSubs.length === 1 ? '' : 's');
+}
+
+function confirmNotify() {
+  if (notifyMode === 'more') return confirmNotifyMore();
+
+  const names = pickedSubs.map(id => subById(id).name).join(', ');
+  showModal(
+    'Post this match?',
+    'We\'ll email ' + pickedSubs.length + ' ' + (pickedSubs.length === 1 ? 'person' : 'people') +
+    ' right now: ' + names + '. First one to accept gets the spot.',
+    'Post it',
+    async () => {
+      const postedBy = me.name || teamById(draft.teamId).captain;
+
+      if (DEMO_MODE) {
+        REQUESTS.unshift({
+          id: 'r' + Date.now(),
+          teamId: draft.teamId, level: draft.level,
+          date: draft.date, time: draft.time,
+          location: draft.location, opponent: draft.opponent,
+          line: draft.line, notes: draft.notes,
+          postedBy: postedBy, postedAt: new Date().toISOString(),
+          notified: pickedSubs.slice(),
+          status: 'open', claimedBy: '', claimedAt: ''
+        });
+        finishPost('Posted — emails on the way');
+        return;
+      }
+
+      const resp = await postAPI({
+        action: 'postRequest',
+        teamId: draft.teamId, level: draft.level,
+        date: draft.date, time: draft.time,
+        location: draft.location, opponent: draft.opponent,
+        line: draft.line, notes: draft.notes,
+        postedBy: postedBy, notified: pickedSubs.slice()
+      });
+
+      if (resp.status !== 'ok') return showToast(resp.message || 'Could not post the match');
+      await ensureData(true);
+      finishPost(resp.message || 'Posted — emails on the way');
+    }
+  );
+}
+
+function finishPost(msg) {
+  draft = null; pickedSubs = []; notifyMode = 'new';
+  ['pDate', 'pTime', 'pOpponent', 'pNotes'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  navigate('requestsScreen', document.getElementById('tabRequests'));
+  showToast(msg);
+}
+
+function confirmNotifyMore() {
+  const already = draft.alreadyNotified || [];
+  const added = pickedSubs.filter(id => already.indexOf(id) === -1);
+  if (added.length === 0) return showToast('Check someone new to notify');
+
+  const names = added.map(id => subById(id).name).join(', ');
+  showModal(
+    'Notify ' + added.length + ' more?',
+    'We\'ll email ' + names + '. Anyone already notified will not be emailed twice.',
+    'Send it',
+    async () => {
+      if (DEMO_MODE) {
+        const r = REQUESTS.find(x => x.id === draft.existingId);
+        if (r) r.notified = pickedSubs.slice();
+        finishPost('Emailed ' + added.length + ' more');
+        return;
+      }
+
+      const resp = await postAPI({
+        action: 'notifyMore', id: draft.existingId, notified: pickedSubs.slice()
+      });
+      if (resp.status !== 'ok') return showToast(resp.message || 'Could not send');
+      await ensureData(true);
+      finishPost(resp.message || ('Emailed ' + added.length + ' more'));
+    }
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   MY REQUESTS  (captain view)
+   ═══════════════════════════════════════════════════════ */
+function renderRequests() {
+  const box = document.getElementById('requestsList');
+  const list = REQUESTS
+    .filter(r => r.status !== 'cancelled')
+    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+
+  if (list.length === 0) {
+    box.innerHTML = '<div class="card"><div class="empty">' +
+      '<span class="empty-icon">📋</span>No matches posted yet.</div></div>';
+    return;
+  }
+
+  box.innerHTML = list.map(r => {
+    const team = teamById(r.teamId);
+    const days = daysUntil(r.date);
+    const filled = r.status === 'filled';
+
+    const statusBadge = filled
+      ? '<span class="badge badge-filled">Filled</span>'
+      : '<span class="badge badge-open">Needs a sub</span>';
+    const urgentBadge = (!filled && days <= 2)
+      ? '<span class="badge badge-urgent">' + (days <= 0 ? 'Today' : days + 'd') + '</span>' : '';
+
+    const notifiedNames = r.notified.map(id => subById(id).name).join(', ') || 'nobody yet';
+
+    let body;
+    if (filled) {
+      const s = subById(r.claimedBy);
+      body = '<div class="match-notes" style="background:#d4edda;color:#155724;">' +
+        '<strong>' + esc(s.name) + '</strong> is subbing' +
+        (s.phone ? ' · ' + esc(s.phone) : '') +
+        (s.email ? '<br>' + esc(s.email) : '') +
+      '</div>';
+    } else {
+      body = '<div class="match-meta" style="margin-top:10px;">' +
+        'Notified ' + r.notified.length + ': ' + esc(notifiedNames) +
+      '</div>' +
+      '<div class="match-actions">' +
+        '<button class="btn btn-outline btn-small" onclick="widenNet(\'' + r.id + '\')">Notify more subs</button>' +
+        '<button class="btn btn-ghost btn-small" onclick="cancelRequest(\'' + r.id + '\')">Cancel</button>' +
+      '</div>';
+    }
+
+    return '<div class="card match-card">' +
+      '<div class="match-team">' + esc(team.name) +
+        '<span class="badge badge-level">' + esc(r.level) + '</span>' + statusBadge + urgentBadge +
+      '</div>' +
+      '<div class="match-when">' + fmtDate(r.date) + ' at ' + fmtTime(r.time) + '</div>' +
+      '<div class="match-meta">' + esc(r.location) +
+        (r.opponent ? ' · vs ' + esc(r.opponent) : '') +
+        (r.line ? '<br>' + esc(r.line) : '') +
+      '</div>' +
+      (r.notes ? '<div class="match-notes">' + esc(r.notes) + '</div>' : '') +
+      body +
+    '</div>';
+  }).join('');
+}
+
+function widenNet(id) {
+  const r = REQUESTS.find(x => x.id === id);
+  if (!r) return;
+
+  notifyMode = 'more';
+  draft = {
+    teamId: r.teamId, level: r.level, date: r.date, time: r.time,
+    location: r.location, opponent: r.opponent, line: r.line, notes: r.notes,
+    existingId: r.id, alreadyNotified: r.notified.slice()
+  };
+  pickedSubs = r.notified.slice();
+
+  document.getElementById('notifySummary').textContent =
+    teamById(r.teamId).name + ' · ' + fmtDate(r.date) + ' · already notified ' + r.notified.length;
+  renderSubPicker();
+  showScreen('notifyScreen');
+}
+
+function cancelRequest(id) {
+  showModal('Cancel this request?',
+    'Everyone you notified will get an email letting them know it\'s no longer needed.',
+    'Cancel the match',
+    async () => {
+      if (DEMO_MODE) {
+        REQUESTS = REQUESTS.filter(r => r.id !== id);
+        renderRequests();
+        updateChrome();
+        showToast('Cancelled — subs notified');
+        return;
+      }
+
+      showLoading('requestsList');
+      const resp = await postAPI({ action: 'cancelRequest', id: id });
+      await ensureData(true);
+      renderRequests();
+      updateChrome();
+      showToast(resp.status === 'ok' ? 'Cancelled — subs notified' : (resp.message || 'Could not cancel'));
+    });
+}
+
+/* ═══════════════════════════════════════════════════════
+   ROSTER
+   ═══════════════════════════════════════════════════════ */
+function initRosterFilter() {
+  const sel = document.getElementById('rosterFilter');
+  if (sel.options.length) return;
+  sel.innerHTML = '<option value="">All teams</option>' +
+    TEAMS.map(t => '<option value="' + t.id + '">' + esc(t.name) + '</option>').join('');
+}
+
+function renderRoster() {
+  const filter = document.getElementById('rosterFilter').value;
+  const box = document.getElementById('rosterList');
+  const list = SUBS
+    .filter(s => s.verified && (!filter || s.teams.indexOf(filter) !== -1))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  if (list.length === 0) {
+    box.innerHTML = '<div class="card"><div class="empty">' +
+      '<span class="empty-icon">👥</span>No subs signed up for this team yet.</div></div>';
+    return;
+  }
+
+  box.innerHTML = '<div class="card">' + list.map(s =>
+    '<div class="list-row">' +
+      '<div>' +
+        '<div class="list-name">' + esc(s.name) + '</div>' +
+        '<div class="list-detail">Levels ' + s.levels.join(', ') +
+          ' · ' + s.teams.length + ' team' + (s.teams.length === 1 ? '' : 's') +
+          (s.phone ? '<br>' + esc(s.phone) : '') +
+        '</div>' +
+      '</div>' +
+      '<div class="badge badge-yours">' + s.subCount + '×</div>' +
+    '</div>'
+  ).join('') + '</div>';
+}
+
+/* ═══════════════════════════════════════════════════════
+   ADD A SUB MANUALLY  (captain)
+   ═══════════════════════════════════════════════════════ */
+let addSubDraft = { levels: [], teams: [] };
+
+function showAddSub() {
+  addSubDraft = { levels: [], teams: [] };
+  ['asName', 'asEmail', 'asPhone'].forEach(id => { document.getElementById(id).value = ''; });
+
+  document.getElementById('asLevels').innerHTML = LEVELS.map(l =>
+    '<button type="button" class="chip" data-level="' + l +
+    '" onclick="toggleAddChip(this,\'level\')">' + l + '</button>'
+  ).join('');
+
+  document.getElementById('asTeams').innerHTML = TEAMS.map(t =>
+    '<button type="button" class="chip chip-wide" data-team="' + t.id +
+    '" onclick="toggleAddChip(this,\'team\')">' + esc(t.name) + '</button>'
+  ).join('');
+
+  showScreen('addSubScreen');
+}
+
+function toggleAddChip(el, kind) {
+  el.classList.toggle('selected');
+  const arr = kind === 'level' ? addSubDraft.levels : addSubDraft.teams;
+  const v = kind === 'level' ? el.dataset.level : el.dataset.team;
+  const i = arr.indexOf(v);
+  if (i === -1) arr.push(v); else arr.splice(i, 1);
+}
+
+async function submitAddSub() {
+  const name  = document.getElementById('asName').value.trim();
+  const email = document.getElementById('asEmail').value.trim();
+  const phone = document.getElementById('asPhone').value.trim();
+
+  if (!name)  return showToast('Add their name');
+  if (!email || email.indexOf('@') === -1 || email.indexOf('.') === -1) return showToast('Check the email address');
+  if (addSubDraft.levels.length === 0) return showToast('Pick at least one level');
+  if (addSubDraft.teams.length === 0)  return showToast('Pick at least one team');
+
+  showModal('Add ' + name + '?',
+    'They go on the sub list right away and get one email at ' + email +
+    ' telling them you added them, with a link to change their levels or opt out.',
+    'Add them',
+    async () => {
+      if (DEMO_MODE) {
+        SUBS.push({
+          id: 's' + Date.now(), name: name, email: email, phone: phone,
+          levels: addSubDraft.levels.slice(), teams: addSubDraft.teams.slice(),
+          subCount: 0, lastSub: '', verified: true
+        });
+        navigate('rosterScreen', document.getElementById('tabRoster'));
+        showToast(name + ' added');
+        return;
+      }
+
+      const resp = await postAPI({
+        action: 'addSub', name: name, email: email, phone: phone,
+        levels: addSubDraft.levels, teams: addSubDraft.teams,
+        addedBy: me.name || 'A captain'
+      });
+
+      if (resp.status !== 'ok') return showToast(resp.message || 'Could not add them');
+      await ensureData(true);
+      navigate('rosterScreen', document.getElementById('tabRoster'));
+      showToast(resp.message || (name + ' added'));
+    });
+}
+
+/* ═══════════════════════════════════════════════════════
+   ME
+   ═══════════════════════════════════════════════════════ */
+function renderMe() {
+  const box = document.getElementById('meContent');
+  const isCaptain = me.role === 'captain';
+  const onList = !!mySubRecordId();
+
+  let html = '<div class="card">' +
+    '<h2>' + esc(me.name || 'You') + '</h2>' +
+    '<p class="card-sub">' + esc(me.email || 'No email on file') + '</p>';
+
+  if (onList) {
+    html += '<div class="section-title">Your sub profile</div>' +
+      '<div class="list-row"><div><div class="list-name">Levels</div>' +
+      '<div class="list-detail">' + (me.levels.join(', ') || 'None') + '</div></div></div>' +
+      '<div class="list-row"><div><div class="list-name">Teams</div>' +
+      '<div class="list-detail">' + (me.teams.map(t => esc(teamById(t).name)).join('<br>') || 'None') + '</div></div></div>' +
+      '<button class="btn btn-outline" style="margin-top:14px;" onclick="editSignup()">Edit my levels &amp; teams</button>';
+  } else {
+    html += '<div class="notice">You\'re not on the sub list. Sign up and captains can start calling on you.</div>' +
+      '<button class="btn btn-primary" onclick="editSignup()">Sign up to sub</button>';
+  }
+
+  html += '</div>';
+
+  html += '<div class="card">' +
+    '<div class="section-title">Captain tools</div>';
+  if (me.pin) {
+    html += '<p class="card-sub" style="margin-bottom:12px;">Unlocked as <strong>' +
+        esc(me.name || 'a captain') + '</strong>.</p>' +
+      '<button class="btn btn-ghost" onclick="lockCaptain()">Lock captain tools</button>';
+  } else {
+    html += '<p class="card-sub" style="margin-bottom:12px;">Posting matches and seeing the sub list needs the captain PIN.</p>' +
+      '<button class="btn btn-outline" onclick="openCaptainGate()">Enter captain PIN</button>';
+  }
+  html += '</div>';
+
+  html += '<div class="card">' +
+    '<div class="section-title">Backend</div>' +
+    '<div class="form-group" style="margin-bottom:10px;">' +
+      '<label for="setUrl">Apps Script Web App URL</label>' +
+      '<input type="url" id="setUrl" value="' + esc(API_URL) + '" placeholder="https://script.google.com/macros/s/.../exec">' +
+      '<p class="form-hint">' + (DEMO_MODE
+        ? 'Empty — the app is running on sample data.'
+        : 'Connected.') + '</p>' +
+    '</div>' +
+    '<button class="btn btn-ghost" onclick="saveScriptUrl()">Save URL &amp; reload</button>' +
+  '</div>';
+
+  html += '<div class="card">' +
+    '<div class="section-title">About</div>' +
+    '<p class="form-hint">Match Subs v' + APP_VERSION + (DEMO_MODE ? ' · demo mode' : '') + '</p>' +
+    '<button class="btn btn-ghost" style="margin-top:12px;" onclick="resetApp()">Reset this device</button>' +
+  '</div>';
+
+  box.innerHTML = html;
+}
+
+function editSignup() {
+  buildSignupPickers();
+  document.getElementById('bottomNav').style.display = 'flex';
+  showScreen('signupScreen');
+}
+
+function openCaptainGate() {
+  buildCaptainPicker();
+  showScreen('captainPinScreen');
+}
+
+function lockCaptain() {
+  me.pin = '';
+  me.role = 'sub';
+  saveMe();
+  dataLoaded = false;
+  updateChrome();
+  navigate('meScreen', document.getElementById('tabMe'));
+  showToast('Captain tools locked');
+}
+
+function saveScriptUrl() {
+  const url = document.getElementById('setUrl').value.trim();
+  if (url && url.indexOf('script.google.com') === -1) {
+    return showToast('That does not look like an Apps Script URL');
+  }
+  localStorage.setItem('matchSubUrl', url);
+  showToast('Saved — reloading');
+  setTimeout(() => location.reload(), 700);
+}
+
+function resetApp() {
+  showModal('Reset this device?',
+    'Clears your name, email and role from this phone. Your spot on the sub list is not deleted.',
+    'Reset', () => { localStorage.clear(); location.reload(); });
+}
+
+/* ═══════════════════════════════════════════════════════
+   BOOT
+   ═══════════════════════════════════════════════════════ */
+async function boot() {
+  document.getElementById('demoBanner').style.display = DEMO_MODE ? '' : 'none';
+  if (DEMO_MODE) {
+    document.getElementById('verifyBtn').textContent = 'Simulate clicking the link (demo)';
+  }
+
+  if (!me.role) {
+    showScreen('setupScreen');
+    document.getElementById('bottomNav').style.display = 'none';
+    await ensureData();
+    return;
+  }
+
+  document.getElementById('bottomNav').style.display = 'flex';
+  await ensureData();
+  updateChrome();
+
+  if (me.role === 'captain') {
+    navigate('postScreen', document.getElementById('tabPost'));
+  } else {
+    navigate('matchesScreen', document.getElementById('tabMatches'));
+  }
+}
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+boot();
+</script>
+</body>
+</html>
