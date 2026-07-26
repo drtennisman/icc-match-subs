@@ -5,16 +5,37 @@ match, hand-pick who gets emailed, and the first sub to accept gets the spot.
 
 ## How it works
 
-- **Players sign themselves up** — name, email, the levels they'll play, and the teams
-  they'll sub for. A confirmation email has to be clicked before they receive anything,
-  which catches typo'd addresses before they cost anyone a match.
-- **Captains post a match** and then choose exactly who to notify. The sub list is split
-  into *on this team's list* and *other players at this level*, and sorted by who has
-  subbed least — so the same reliable person doesn't get asked every single time.
+- **Players sign themselves up** — name, email, and **one question: their soft court
+  level**. A confirmation email has to be clicked before they receive anything, which
+  catches typo'd addresses before they cost anyone a match.
+- **Captains post a match** and then choose exactly who to notify. The list shows
+  everyone eligible, grouped by level with the strongest first, and within each level
+  sorted by who has subbed least for that team — so the same reliable person doesn't
+  get asked every single time.
 - **First to accept wins.** Subs can accept straight from the email or in the app. The
   captain gets an email with the sub's name, email and phone.
 - **If nobody bites**, the captain gets a nudge email after 24 hours with a reminder to
   widen the net.
+
+## The two rules that decide who a captain sees
+
+**You can sub up, never down.** A match at 3.5 can use anyone rated 3.5 or lower. A 4.0
+player is not eligible and does not appear at all. This is why signup only needs one
+question — eligibility falls out of a single number.
+
+**Three matches per team, per season.** Once someone has subbed three times for Miller
+4.0 they're locked for that team until the season changes, but stay fully available for
+every other team. Maxed-out players are still shown in the picker, greyed out with a
+reason, so a captain hunting for a specific name sees *why* they can't pick them rather
+than finding them mysteriously absent.
+
+The cap is enforced **on the server**, not just in the picker — the one-tap claim link
+in a notification email bypasses the UI entirely, so the backend is the only place that
+can actually stop it. Backing out of a match gives the slot back.
+
+Seasons are **Spring and Fall only**. Rolling over is a one-cell edit: change `Season`
+on the Config tab and every count reads as zero. Nothing parses the value, so any
+consistent naming works so long as it changes between seasons.
 
 ## Architecture
 
@@ -33,7 +54,7 @@ All five are created automatically the first time the script runs. **Teams** and
 | Tab | Headers |
 |-----|---------|
 | **Teams** | `TeamID, Team Name, Level, Captain, Captain Email, Active` |
-| **Subs** | `SubID, Name, Email, Phone, Levels, Teams, Verified, Token, Active, Added By, Signed Up At, Sub Count, Last Sub` |
+| **Subs** | `SubID, Name, Email, Phone, Level, Verified, Token, Active, Added By, Signed Up At, Sub Count, Last Sub, Season, Team Subs` |
 | **Requests** | `ID, TeamID, Level, Date, Time, Location, Opponent, Line, Notes, Posted By, Posted At, Notified, Status, Claimed By, Claimed At, Nudged` |
 | **History** | `Request ID, Team, Match Date, Sub Name, Sub Email, Claimed At, Posted By` |
 | **Config** | `Key, Value` |
@@ -58,6 +79,12 @@ right or that captain hears nothing.
 | `CaptainPIN` | Shared PIN that unlocks posting and the sub list. **Change it from `1234`.** |
 | `ManagerEmail` | Optional — CC'd on every claim confirmation. Leave blank to skip. |
 | `NudgeHours` | How long before a captain gets nudged about an unclaimed match. Default `24`. |
+| `Season` | Current season, e.g. `2026 Fall`. Changing it resets every sub's per-team count. |
+| `MaxSubsPerTeam` | How many times one sub may play for one team per season. Default `3`. |
+
+The `Team Subs` column on the Subs tab stores counts as `miller40:2, ray45:1` — readable
+if you need to check or correct someone by hand. It's paired with `Season`, so a count
+from a previous season is ignored rather than deleted.
 
 ## Why there's a PIN
 

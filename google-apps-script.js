@@ -28,7 +28,7 @@ var DEFAULT_CONFIG = [
   ['CaptainPIN', '1234'],
   ['ManagerEmail', ''],
   ['NudgeHours', '24'],
-  ['Season', '2026 Summer'],
+  ['Season', '2026 Fall'],
   ['MaxSubsPerTeam', '3']
 ];
 
@@ -180,6 +180,10 @@ function normLevel(v) {
    season. Counts are stored per sub as "teamId:count, teamId:count"
    alongside the season they belong to, so when the season name in Config
    changes everyone's counts read as zero without editing a single row.
+
+   Seasons run Spring and Fall only — set Config "Season" to e.g.
+   "2026 Fall". The value is just a label; nothing parses it, so any
+   consistent naming works as long as it changes between seasons.
    ═══════════════════════════════════════════════════════ */
 
 function currentSeason() {
