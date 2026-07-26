@@ -313,7 +313,7 @@
   <div class="screen" id="signupScreen">
     <div class="card">
       <h2>Sign up to sub</h2>
-      <p class="card-sub">Tell us how to reach you and which matches you'd actually want. You'll only be emailed for matches that fit.</p>
+      <p class="card-sub">Three quick things and you're on the list. You'll only be emailed when a team at your level actually needs someone.</p>
 
       <div class="form-group">
         <label for="suName">Your name</label>
@@ -462,6 +462,19 @@
 
   <!-- ══════════ SUB ROSTER ══════════ -->
   <div class="screen" id="rosterScreen">
+    <div class="card">
+      <h2>Invite subs</h2>
+      <p class="card-sub">
+        Ready-to-send text. The link drops people straight on the signup screen —
+        no menus to figure out.
+      </p>
+      <div class="form-group">
+        <textarea id="inviteText" rows="9" readonly onclick="this.select()"></textarea>
+      </div>
+      <button class="btn btn-primary" id="inviteShareBtn" onclick="shareInvite()" style="display:none;">Share…</button>
+      <button class="btn btn-outline" onclick="copyInvite()">Copy message</button>
+    </div>
+
     <div class="card">
       <h2>Sub list</h2>
       <p class="card-sub">Everyone who's signed up, and what they'll play. Most people add themselves — but you can add someone who won't install the app.</p>
@@ -841,7 +854,7 @@ async function navigate(screenId, tabEl) {
   if (screenId === 'matchesScreen')       renderMatches();
   else if (screenId === 'postScreen')     initPostForm();
   else if (screenId === 'requestsScreen') renderRequests();
-  else if (screenId === 'rosterScreen')   { initRosterFilter(); renderRoster(); }
+  else if (screenId === 'rosterScreen')   { buildInvite(); initRosterFilter(); renderRoster(); }
   else if (screenId === 'meScreen')       renderMe();
 }
 
@@ -1666,6 +1679,61 @@ function renderRoster() {
 }
 
 /* ═══════════════════════════════════════════════════════
+   INVITE  (captain)
+
+   Captains recruit by text, so the whole thing has to survive being pasted
+   into Messages: plain text, no formatting, link on its own line.
+   ═══════════════════════════════════════════════════════ */
+
+/** Deep link that opens straight on the signup screen. */
+function joinLink() {
+  return location.origin + location.pathname.replace(/index\.html$/, '') + '?join=1';
+}
+
+function inviteMessage() {
+  const from = me.name ? '\n\n— ' + me.name : '';
+  return "Hey! We're using an app to line up tennis subs this season.\n\n" +
+    "If you'd be open to subbing, you can add yourself in about 30 seconds — " +
+    "it just asks your name, email, and your soft court level.\n\n" +
+    "You'll only get an email when a team at your level actually needs someone, " +
+    "and you're never obligated to say yes. You can take yourself off the list anytime.\n\n" +
+    joinLink() + from;
+}
+
+function buildInvite() {
+  const box = document.getElementById('inviteText');
+  if (box) box.value = inviteMessage();
+  const shareBtn = document.getElementById('inviteShareBtn');
+  if (shareBtn && navigator.share) shareBtn.style.display = '';
+}
+
+async function shareInvite() {
+  try {
+    await navigator.share({ text: inviteMessage() });
+  } catch (e) {
+    if (e && e.name === 'AbortError') return; // user closed the sheet
+    copyInvite();
+  }
+}
+
+async function copyInvite() {
+  const text = inviteMessage();
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('Message copied — paste it into a text');
+  } catch (e) {
+    // Older iOS Safari and any non-secure context land here.
+    const box = document.getElementById('inviteText');
+    box.removeAttribute('readonly');
+    box.select();
+    box.setSelectionRange(0, 99999);
+    const ok = document.execCommand('copy');
+    box.setAttribute('readonly', 'readonly');
+    showToast(ok ? 'Message copied' : 'Press and hold the text to copy');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
    ADD A SUB MANUALLY  (captain)
    ═══════════════════════════════════════════════════════ */
 let addSubDraft = { level: '' };
@@ -1830,6 +1898,22 @@ async function boot() {
   document.getElementById('demoBanner').style.display = DEMO_MODE ? '' : 'none';
   if (DEMO_MODE) {
     document.getElementById('verifyBtn').textContent = 'Simulate clicking the link (demo)';
+  }
+
+  /*
+   * Someone tapping an invite link is here to sub, so skip the "which are
+   * you?" question entirely — unless they're already on the list, in which
+   * case dropping them on a blank signup form would just be confusing.
+   */
+  const invited = /[?&]join=/.test(location.search);
+  if (invited && !(me.verified && me.subId)) {
+    await ensureData();
+    me.role = 'sub';
+    saveMe();
+    buildSignupPickers();
+    showScreen('signupScreen');
+    document.getElementById('bottomNav').style.display = 'none';
+    return;
   }
 
   if (!me.role) {
