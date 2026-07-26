@@ -331,13 +331,12 @@
       </div>
 
       <div class="form-group">
-        <label>Levels you'll play</label>
+        <label>Your soft court level</label>
         <div class="chip-grid" id="suLevels"></div>
-      </div>
-
-      <div class="form-group">
-        <label>Teams you'll sub for</label>
-        <div class="chip-grid" id="suTeams" style="flex-direction:column;"></div>
+        <p class="form-hint">
+          You'll be shown to captains of teams at your level and above — you can play
+          up, but not down. Pick the level you actually play now.
+        </p>
       </div>
 
       <button class="btn btn-primary" id="suSubmit" onclick="submitSignup()">Sign me up</button>
@@ -467,7 +466,7 @@
       <h2>Sub list</h2>
       <p class="card-sub">Everyone who's signed up, and what they'll play. Most people add themselves — but you can add someone who won't install the app.</p>
       <div class="form-group">
-        <label for="rosterFilter">Filter by team</label>
+        <label for="rosterFilter">Filter by level</label>
         <select id="rosterFilter" onchange="renderRoster()"></select>
       </div>
       <button class="btn btn-outline" onclick="showAddSub()">+ Add a sub manually</button>
@@ -497,12 +496,8 @@
         <input type="tel" id="asPhone" placeholder="(205) 555-0123">
       </div>
       <div class="form-group">
-        <label>Levels they'll play</label>
+        <label>Their soft court level</label>
         <div class="chip-grid" id="asLevels"></div>
-      </div>
-      <div class="form-group">
-        <label>Teams they'll sub for</label>
-        <div class="chip-grid" id="asTeams" style="flex-direction:column;"></div>
       </div>
       <button class="btn btn-primary" onclick="submitAddSub()">Add &amp; notify them</button>
       <button class="btn btn-ghost" onclick="navigate('rosterScreen', document.getElementById('tabRoster'))">Cancel</button>
@@ -555,7 +550,7 @@
 /* ═══════════════════════════════════════════════════════
    CONFIG
    ═══════════════════════════════════════════════════════ */
-const APP_VERSION = 2; // must match VERSION in google-apps-script.js
+const APP_VERSION = 3; // must match VERSION in google-apps-script.js
 
 /*
  * Paste the deployed Apps Script Web App URL here once it exists.
@@ -586,7 +581,7 @@ const CURRENT_SEASON = '2026 Summer';
    LOCAL STATE
    ═══════════════════════════════════════════════════════ */
 let me = JSON.parse(localStorage.getItem('matchSubMe') || 'null') || {
-  name: '', email: '', phone: '', role: '', levels: [], teams: [],
+  name: '', email: '', phone: '', role: '', level: '',
   verified: false, subId: '', pin: ''
 };
 
@@ -609,15 +604,15 @@ let TEAMS = [
 // teamSubs = how many times this person has already subbed for each team this
 // season. Three for any one team means they're done for that team.
 let SUBS = [
-  { id:'s1', name:'Sarah Jones',   email:'sarah@example.com',  phone:'(205) 555-0142', levels:['4.0','4.5'], teams:['t2','t5'], season:CURRENT_SEASON, teamSubs:{ t2:3 },       lastSub:'2026-06-12', verified:true },
+  { id:'s1', name:'Sarah Jones',   email:'sarah@example.com',  phone:'(205) 555-0142', level:'4.0', season:CURRENT_SEASON, teamSubs:{ t2:3 },       lastSub:'2026-06-12', verified:true },
   { id:'s2', name:'Meg Taylor',    email:'meg@example.com',    phone:'',               levels:['4.0'],       teams:['t2'],      season:CURRENT_SEASON, teamSubs:{},             lastSub:'',           verified:true },
-  { id:'s3', name:'Kim Alvarez',   email:'kim@example.com',    phone:'(205) 555-0177', levels:['3.5','4.0'], teams:['t1','t2'], season:CURRENT_SEASON, teamSubs:{ t2:1 },       lastSub:'2026-05-02', verified:true },
+  { id:'s3', name:'Kim Alvarez',   email:'kim@example.com',    phone:'(205) 555-0177', level:'3.5', season:CURRENT_SEASON, teamSubs:{ t2:1 },       lastSub:'2026-05-02', verified:true },
   { id:'s4', name:'Beth Nguyen',   email:'beth@example.com',   phone:'',               levels:['3.5'],       teams:['t1'],      season:CURRENT_SEASON, teamSubs:{ t1:3 },       lastSub:'2026-07-10', verified:true },
-  { id:'s5', name:'Tom Baxter',    email:'tom@example.com',    phone:'(205) 555-0190', levels:['4.0','4.5'], teams:['t4','t5'], season:CURRENT_SEASON, teamSubs:{ t4:1, t5:1 }, lastSub:'2026-06-28', verified:true },
-  { id:'s6', name:'Chris Doyle',   email:'chris@example.com',  phone:'',               levels:['3.5','4.0'], teams:['t3','t4'], season:CURRENT_SEASON, teamSubs:{},             lastSub:'',           verified:true },
+  { id:'s5', name:'Tom Baxter',    email:'tom@example.com',    phone:'(205) 555-0190', level:'4.0', season:CURRENT_SEASON, teamSubs:{ t4:1, t5:1 }, lastSub:'2026-06-28', verified:true },
+  { id:'s6', name:'Chris Doyle',   email:'chris@example.com',  phone:'',               level:'3.5', season:CURRENT_SEASON, teamSubs:{},             lastSub:'',           verified:true },
   { id:'s7', name:'Raj Patel',     email:'raj@example.com',    phone:'(205) 555-0155', levels:['4.0'],       teams:['t4'],      season:CURRENT_SEASON, teamSubs:{ t4:3 },       lastSub:'2026-07-01', verified:true },
   { id:'s8', name:'Dana Cole',     email:'dana@example.com',   phone:'',               levels:['4.0'],       teams:['t5'],      season:CURRENT_SEASON, teamSubs:{ t5:1 },       lastSub:'2026-04-19', verified:true },
-  { id:'s9', name:'Pat Rivers',    email:'pat@example.com',    phone:'',               levels:['3.0','3.5'], teams:['t1','t3'], season:CURRENT_SEASON, teamSubs:{ t1:2 },       lastSub:'2026-06-05', verified:true }
+  { id:'s9', name:'Pat Rivers',    email:'pat@example.com',    phone:'',               level:'3.0', season:CURRENT_SEASON, teamSubs:{ t1:2 },       lastSub:'2026-06-05', verified:true }
 ];
 
 let REQUESTS = [
@@ -647,7 +642,7 @@ let REQUESTS = [
    HELPERS
    ═══════════════════════════════════════════════════════ */
 function teamById(id) { return TEAMS.find(t => t.id === id) || { name:'Unknown team', level:'', captain:'' }; }
-function subById(id)  { return SUBS.find(s => s.id === id)  || { name:'Unknown', levels:[], teams:[] }; }
+function subById(id)  { return SUBS.find(s => s.id === id)  || { name:'Unknown', level:'' }; }
 
 /* ── Per-team sub counts (the 3-per-season rule) ──────────── */
 
@@ -927,14 +922,8 @@ async function verifyCaptainPin() {
 function buildSignupPickers() {
   const lvlBox = document.getElementById('suLevels');
   lvlBox.innerHTML = LEVELS.map(l =>
-    '<button type="button" class="chip' + (me.levels.indexOf(l) !== -1 ? ' selected' : '') +
-    '" data-level="' + l + '" onclick="toggleChip(this,\'level\')">' + l + '</button>'
-  ).join('');
-
-  const teamBox = document.getElementById('suTeams');
-  teamBox.innerHTML = TEAMS.map(t =>
-    '<button type="button" class="chip chip-wide' + (me.teams.indexOf(t.id) !== -1 ? ' selected' : '') +
-    '" data-team="' + t.id + '" onclick="toggleChip(this,\'team\')">' + esc(t.name) + '</button>'
+    '<button type="button" class="chip' + (me.level === l ? ' selected' : '') +
+    '" data-level="' + l + '" onclick="pickLevel(this)">' + l + '</button>'
   ).join('');
 
   document.getElementById('suName').value  = me.name;
@@ -942,17 +931,11 @@ function buildSignupPickers() {
   document.getElementById('suPhone').value = me.phone;
 }
 
-function toggleChip(el, kind) {
-  el.classList.toggle('selected');
-  if (kind === 'level') {
-    const v = el.dataset.level;
-    const i = me.levels.indexOf(v);
-    if (i === -1) me.levels.push(v); else me.levels.splice(i, 1);
-  } else {
-    const v = el.dataset.team;
-    const i = me.teams.indexOf(v);
-    if (i === -1) me.teams.push(v); else me.teams.splice(i, 1);
-  }
+/** One level per person — picking a chip clears the others. */
+function pickLevel(el) {
+  el.parentNode.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  me.level = el.dataset.level;
 }
 
 async function submitSignup() {
@@ -962,8 +945,7 @@ async function submitSignup() {
 
   if (!name)  return showToast('Add your name');
   if (!email || email.indexOf('@') === -1 || email.indexOf('.') === -1) return showToast('Check your email address');
-  if (me.levels.length === 0) return showToast('Pick at least one level');
-  if (me.teams.length === 0)  return showToast('Pick at least one team');
+  if (!me.level) return showToast('Pick your level');
 
   me.name = name; me.email = email; me.phone = phone;
   saveMe();
@@ -983,7 +965,7 @@ async function submitSignup() {
 
   const resp = await postAPI({
     action: 'signup', name: name, email: email, phone: phone,
-    levels: me.levels, teams: me.teams
+    level: me.level
   });
 
   btn.disabled = false; btn.textContent = 'Sign me up';
@@ -1018,8 +1000,7 @@ async function afterVerify() {
   }
 
   me.verified = true;
-  me.levels = rec.levels.slice();
-  me.teams = rec.teams.slice();
+  me.level = rec.level;
   saveMe();
 
   document.getElementById('bottomNav').style.display = 'flex';
@@ -1035,16 +1016,16 @@ function demoConfirm() {
   // Add (or update) the demo roster so the rest of the app has something to show
   const existing = SUBS.find(s => s.email.toLowerCase() === me.email.toLowerCase());
   if (existing) {
-    existing.name = me.name; existing.levels = me.levels.slice();
-    existing.teams = me.teams.slice(); existing.verified = true;
+    existing.name = me.name; existing.level = me.level;
+    existing.verified = true;
   } else {
     SUBS.push({
       id: 'me', name: me.name, email: me.email, phone: me.phone,
-      levels: me.levels.slice(), teams: me.teams.slice(),
+      level: me.level,
       season: CURRENT_SEASON, teamSubs: {}, lastSub: '', verified: true
     });
     // Pretend a captain already had an open match that fits
-    const fit = REQUESTS.find(r => r.status === 'open' && me.levels.indexOf(r.level) !== -1);
+    const fit = REQUESTS.find(r => r.status === 'open' && Number(me.level) <= Number(r.level));
     if (fit && fit.notified.indexOf('me') === -1) fit.notified.push('me');
   }
 
@@ -1298,16 +1279,21 @@ function goToNotify() {
 /* ═══════════════════════════════════════════════════════
    POST — step 2: the sub picker
    ═══════════════════════════════════════════════════════ */
+/**
+ * A player can sub up but never down, so a 3.5 match can use anyone rated
+ * 3.5 or lower — and a 4.0 is not eligible at all.
+ *
+ * Strongest first, since they're the closest match for the team. Within a
+ * level, whoever has subbed least for this team comes first, so the same
+ * reliable person isn't asked every week.
+ */
 function eligibleSubs() {
-  // Anyone verified who plays this level. Subs who explicitly listed this
-  // team sort first — they're the most likely yes.
+  const ceiling = Number(draft.level);
   return SUBS
-    .filter(s => s.verified && s.levels.indexOf(draft.level) !== -1)
+    .filter(s => s.verified && s.level !== '' && Number(s.level) <= ceiling)
     .sort((a, b) => {
-      const aOn = a.teams.indexOf(draft.teamId) !== -1 ? 0 : 1;
-      const bOn = b.teams.indexOf(draft.teamId) !== -1 ? 0 : 1;
-      if (aOn !== bOn) return aOn - bOn;
-      // Spread the load across whoever still has room on this team.
+      const byLevel = Number(b.level) - Number(a.level);
+      if (byLevel !== 0) return byLevel;
       const aCount = teamSubCount(a, draft.teamId);
       const bCount = teamSubCount(b, draft.teamId);
       if (aCount !== bCount) return aCount - bCount;
@@ -1332,31 +1318,29 @@ function renderSubPicker() {
   // not just find them missing.
   const maxed   = list.filter(s => isMaxedFor(s, draft.teamId));
   const usable  = list.filter(s => !isMaxedFor(s, draft.teamId));
-  const onList  = usable.filter(s => s.teams.indexOf(draft.teamId) !== -1);
-  const offList = usable.filter(s => s.teams.indexOf(draft.teamId) === -1);
   const teamName = teamById(draft.teamId).name;
 
+  // Strongest level first — that's the captain's best option, and anyone
+  // further down the list is a bigger stretch for the team.
+  const levelsPresent = [];
+  usable.forEach(s => { if (levelsPresent.indexOf(s.level) === -1) levelsPresent.push(s.level); });
+  levelsPresent.sort((a, b) => Number(b) - Number(a));
+
   let html = '';
-  if (onList.length) {
+  levelsPresent.forEach(lvl => {
+    const group = usable.filter(s => s.level === lvl);
+    const atTeamLevel = Number(lvl) === Number(draft.level);
     html += '<div class="level-group">' +
       '<div class="level-head">' +
-        '<span class="lvl">On this team\'s list <small>(' + onList.length + ')</small></span>' +
-        '<button class="link-btn" onclick="selectGroup(\'on\')">Select all</button>' +
+        '<span class="lvl">' + esc(lvl) +
+          (atTeamLevel ? ' <small>· team level</small>' : ' <small>· playing up</small>') +
+          ' <small>(' + group.length + ')</small></span>' +
+        '<button class="link-btn" onclick="selectGroup(\'' + esc(lvl) + '\')">Select all</button>' +
       '</div>' +
-      onList.map(subRowHTML).join('') +
+      group.map(subRowHTML).join('') +
     '</div>';
-  }
-  if (offList.length) {
-    html += '<div class="level-group">' +
-      '<div class="level-head">' +
-        '<span class="lvl">Other ' + esc(draft.level) + ' players <small>(' + offList.length + ')</small></span>' +
-        '<button class="link-btn" onclick="selectGroup(\'off\')">Select all</button>' +
-      '</div>' +
-      '<p class="form-hint" style="margin:-4px 0 8px;">These folks play ' + esc(draft.level) +
-      " but didn't list " + esc(teamName) + '. Worth a shot if the first group passes.</p>' +
-      offList.map(subRowHTML).join('') +
-    '</div>';
-  }
+  });
+
   if (maxed.length) {
     html += '<div class="level-group">' +
       '<div class="level-head">' +
@@ -1369,9 +1353,9 @@ function renderSubPicker() {
     '</div>';
   }
 
-  if (!onList.length && !offList.length) {
+  if (!usable.length) {
     html += '<div class="empty" style="padding:18px 0;">' +
-      'Everyone who plays ' + esc(draft.level) + ' has already maxed out for this team. ' +
+      'Everyone eligible for ' + esc(draft.level) + ' has already maxed out for this team. ' +
       'Ask the league about an exception, or add a new sub below.</div>';
   }
 
@@ -1381,7 +1365,6 @@ function renderSubPicker() {
 
 function subRowHTML(s) {
   const selected = pickedSubs.indexOf(s.id) !== -1;
-  const onList = s.teams.indexOf(draft.teamId) !== -1;
   const already = notifyMode === 'more' &&
                   (draft.alreadyNotified || []).indexOf(s.id) !== -1;
   const used = teamSubCount(s, draft.teamId);
@@ -1403,11 +1386,10 @@ function subRowHTML(s) {
     '<div class="sub-check">' + (maxed ? '🚫' : (selected ? '✓' : '')) + '</div>' +
     '<div class="sub-info">' +
       '<div class="sub-name">' + esc(s.name) +
-        (onList && !maxed ? ' <span class="badge badge-onlist">On list</span>' : '') +
         (maxed ? ' <span class="badge badge-maxed">Maxed out</span>' : '') +
         (already ? ' <span class="badge badge-yours">Already emailed</span>' : '') +
       '</div>' +
-      '<div class="sub-detail">' + s.levels.join(', ') + ' · ' + history + '</div>' +
+      '<div class="sub-detail">' + esc(s.level) + ' · ' + history + '</div>' +
     '</div>' +
   '</div>';
 }
@@ -1421,7 +1403,7 @@ function toggleSub(id) {
 function selectGroup(which) {
   const already = (notifyMode === 'more' && draft.alreadyNotified) || [];
   const list = eligibleSubs()
-    .filter(s => which === 'on' ? s.teams.indexOf(draft.teamId) !== -1 : s.teams.indexOf(draft.teamId) === -1)
+    .filter(s => s.level === which && !isMaxedFor(s, draft.teamId))
     .filter(s => already.indexOf(s.id) === -1);
   if (list.length === 0) return;
   const allIn = list.every(s => pickedSubs.indexOf(s.id) !== -1);
@@ -1639,15 +1621,15 @@ function cancelRequest(id) {
 function initRosterFilter() {
   const sel = document.getElementById('rosterFilter');
   if (sel.options.length) return;
-  sel.innerHTML = '<option value="">All teams</option>' +
-    TEAMS.map(t => '<option value="' + t.id + '">' + esc(t.name) + '</option>').join('');
+  sel.innerHTML = '<option value="">All levels</option>' +
+    LEVELS.map(l => '<option value="' + l + '">' + l + '</option>').join('');
 }
 
 function renderRoster() {
   const filter = document.getElementById('rosterFilter').value;
   const box = document.getElementById('rosterList');
   const list = SUBS
-    .filter(s => s.verified && (!filter || s.teams.indexOf(filter) !== -1))
+    .filter(s => s.verified && (!filter || s.level === filter))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   if (list.length === 0) {
@@ -1660,8 +1642,8 @@ function renderRoster() {
     '<div class="list-row">' +
       '<div>' +
         '<div class="list-name">' + esc(s.name) + '</div>' +
-        '<div class="list-detail">Levels ' + s.levels.join(', ') +
-          ' · ' + s.teams.length + ' team' + (s.teams.length === 1 ? '' : 's') +
+        '<div class="list-detail">Level ' + esc(s.level) +
+          ' · subbed ' + totalSubCount(s) + '× this season' +
           (s.phone ? '<br>' + esc(s.phone) : '') +
         '</div>' +
       '</div>' +
@@ -1673,31 +1655,24 @@ function renderRoster() {
 /* ═══════════════════════════════════════════════════════
    ADD A SUB MANUALLY  (captain)
    ═══════════════════════════════════════════════════════ */
-let addSubDraft = { levels: [], teams: [] };
+let addSubDraft = { level: '' };
 
 function showAddSub() {
-  addSubDraft = { levels: [], teams: [] };
+  addSubDraft = { level: '' };
   ['asName', 'asEmail', 'asPhone'].forEach(id => { document.getElementById(id).value = ''; });
 
   document.getElementById('asLevels').innerHTML = LEVELS.map(l =>
     '<button type="button" class="chip" data-level="' + l +
-    '" onclick="toggleAddChip(this,\'level\')">' + l + '</button>'
-  ).join('');
-
-  document.getElementById('asTeams').innerHTML = TEAMS.map(t =>
-    '<button type="button" class="chip chip-wide" data-team="' + t.id +
-    '" onclick="toggleAddChip(this,\'team\')">' + esc(t.name) + '</button>'
+    '" onclick="pickAddLevel(this)">' + l + '</button>'
   ).join('');
 
   showScreen('addSubScreen');
 }
 
-function toggleAddChip(el, kind) {
-  el.classList.toggle('selected');
-  const arr = kind === 'level' ? addSubDraft.levels : addSubDraft.teams;
-  const v = kind === 'level' ? el.dataset.level : el.dataset.team;
-  const i = arr.indexOf(v);
-  if (i === -1) arr.push(v); else arr.splice(i, 1);
+function pickAddLevel(el) {
+  el.parentNode.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  addSubDraft.level = el.dataset.level;
 }
 
 async function submitAddSub() {
@@ -1707,8 +1682,7 @@ async function submitAddSub() {
 
   if (!name)  return showToast('Add their name');
   if (!email || email.indexOf('@') === -1 || email.indexOf('.') === -1) return showToast('Check the email address');
-  if (addSubDraft.levels.length === 0) return showToast('Pick at least one level');
-  if (addSubDraft.teams.length === 0)  return showToast('Pick at least one team');
+  if (!addSubDraft.level) return showToast('Pick their level');
 
   showModal('Add ' + name + '?',
     'They go on the sub list right away and get one email at ' + email +
@@ -1718,7 +1692,7 @@ async function submitAddSub() {
       if (DEMO_MODE) {
         SUBS.push({
           id: 's' + Date.now(), name: name, email: email, phone: phone,
-          levels: addSubDraft.levels.slice(), teams: addSubDraft.teams.slice(),
+          level: addSubDraft.level,
           subCount: 0, lastSub: '', verified: true
         });
         navigate('rosterScreen', document.getElementById('tabRoster'));
@@ -1728,7 +1702,7 @@ async function submitAddSub() {
 
       const resp = await postAPI({
         action: 'addSub', name: name, email: email, phone: phone,
-        levels: addSubDraft.levels, teams: addSubDraft.teams,
+        level: addSubDraft.level,
         addedBy: me.name || 'A captain'
       });
 
@@ -1753,11 +1727,12 @@ function renderMe() {
 
   if (onList) {
     html += '<div class="section-title">Your sub profile</div>' +
-      '<div class="list-row"><div><div class="list-name">Levels</div>' +
-      '<div class="list-detail">' + (me.levels.join(', ') || 'None') + '</div></div></div>' +
-      '<div class="list-row"><div><div class="list-name">Teams</div>' +
-      '<div class="list-detail">' + (me.teams.map(t => esc(teamById(t).name)).join('<br>') || 'None') + '</div></div></div>' +
-      '<button class="btn btn-outline" style="margin-top:14px;" onclick="editSignup()">Edit my levels &amp; teams</button>';
+      '<div class="list-row"><div><div class="list-name">Soft court level</div>' +
+      '<div class="list-detail">' + (esc(me.level) || 'Not set') +
+      '</div></div></div>' +
+      '<div class="list-row"><div><div class="list-name">You can be asked by</div>' +
+      '<div class="list-detail">Teams rated ' + (esc(me.level) || '—') + ' and above</div></div></div>' +
+      '<button class="btn btn-outline" style="margin-top:14px;" onclick="editSignup()">Change my level</button>';
   } else {
     html += '<div class="notice">You\'re not on the sub list. Sign up and captains can start calling on you.</div>' +
       '<button class="btn btn-primary" onclick="editSignup()">Sign up to sub</button>';

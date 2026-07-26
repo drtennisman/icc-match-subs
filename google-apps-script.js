@@ -8,13 +8,13 @@
  * then redeploy with Deploy → Manage deployments → edit → New version.
  */
 
-var VERSION = 2;
+var VERSION = 3;
 
 /* Sheet tabs are created automatically on first run. */
 var TABS = {
   Config:   ['Key', 'Value'],
   Teams:    ['TeamID', 'Team Name', 'Level', 'Captain', 'Captain Email', 'Active'],
-  Subs:     ['SubID', 'Name', 'Email', 'Phone', 'Levels', 'Teams', 'Verified',
+  Subs:     ['SubID', 'Name', 'Email', 'Phone', 'Level', 'Verified',
              'Token', 'Active', 'Added By', 'Signed Up At', 'Sub Count', 'Last Sub'],
   Requests: ['ID', 'TeamID', 'Level', 'Date', 'Time', 'Location', 'Opponent', 'Line',
              'Notes', 'Posted By', 'Posted At', 'Notified', 'Status', 'Claimed By',
@@ -170,10 +170,6 @@ function normLevel(v) {
   return n.toFixed(1);
 }
 
-function normLevelList(v) {
-  return splitList(v).map(normLevel);
-}
-
 /** Sheet cells come back as Date objects or strings — normalize to YYYY-MM-DD. */
 function toDateString(v) {
   if (!v) return '';
@@ -256,8 +252,7 @@ function loadSubs() {
       name: String(r.Name).trim(),
       email: normEmail(r.Email),
       phone: String(r.Phone || '').trim(),
-      levels: normLevelList(r.Levels),
-      teams: splitList(r.Teams),
+      level: normLevel(r.Level),
       verified: isTrue(r.Verified),
       addedBy: String(r['Added By'] || '').trim(),
       subCount: Number(r['Sub Count']) || 0,
@@ -327,7 +322,7 @@ function scrubSubs(subs, isCaptain) {
   for (var i = 0; i < subs.length; i++) {
     var s = subs[i];
     out.push({
-      id: s.id, name: s.name, levels: s.levels, teams: s.teams,
+      id: s.id, name: s.name, level: s.level,
       verified: s.verified, subCount: s.subCount, lastSub: s.lastSub,
       email: '', phone: ''
     });
@@ -465,8 +460,7 @@ function actionSignup(data) {
       var token = String(rows[i].Token).trim() || makeToken();
       sheet.getRange(rows[i]._row, colIndex(sheet, 'Name')).setValue(name);
       sheet.getRange(rows[i]._row, colIndex(sheet, 'Phone')).setValue(data.phone || '');
-      sheet.getRange(rows[i]._row, colIndex(sheet, 'Levels')).setValue((data.levels || []).join(', '));
-      sheet.getRange(rows[i]._row, colIndex(sheet, 'Teams')).setValue((data.teams || []).join(', '));
+      sheet.getRange(rows[i]._row, colIndex(sheet, 'Level')).setValue(normLevel(data.level));
       sheet.getRange(rows[i]._row, colIndex(sheet, 'Token')).setValue(token);
       sheet.getRange(rows[i]._row, colIndex(sheet, 'Active')).setValue(true);
 
@@ -484,8 +478,7 @@ function actionSignup(data) {
   var id = newId('s');
   var tok = makeToken();
   sheet.appendRow([
-    id, name, email, data.phone || '',
-    (data.levels || []).join(', '), (data.teams || []).join(', '),
+    id, name, email, data.phone || '', normLevel(data.level),
     false, tok, true, '', new Date(), 0, ''
   ]);
 
@@ -500,8 +493,7 @@ function actionUpdateProfile(data) {
 
   if (data.name)  sheet.getRange(row, colIndex(sheet, 'Name')).setValue(String(data.name).trim());
   if (data.phone !== undefined) sheet.getRange(row, colIndex(sheet, 'Phone')).setValue(data.phone);
-  if (data.levels) sheet.getRange(row, colIndex(sheet, 'Levels')).setValue(data.levels.join(', '));
-  if (data.teams)  sheet.getRange(row, colIndex(sheet, 'Teams')).setValue(data.teams.join(', '));
+  if (data.level)  sheet.getRange(row, colIndex(sheet, 'Level')).setValue(normLevel(data.level));
 
   return { status: 'ok', message: 'Profile updated.' };
 }
@@ -524,13 +516,12 @@ function actionAddSub(data) {
   var id = newId('s');
   var tok = makeToken();
   sheet.appendRow([
-    id, name, email, data.phone || '',
-    (data.levels || []).join(', '), (data.teams || []).join(', '),
+    id, name, email, data.phone || '', normLevel(data.level),
     true, tok, true, String(data.addedBy || 'a captain'), new Date(), 0, ''
   ]);
 
   sendAddedByCaptainEmail(id, name, email, tok, String(data.addedBy || 'A captain'),
-                          (data.levels || []).join(', '), (data.teams || []));
+                          normLevel(data.level));
   return { status: 'ok', subId: id, message: name + ' added and notified.' };
 }
 
@@ -756,19 +747,16 @@ function sendVerifyEmail(subId, name, email, token) {
   }
 }
 
-function sendAddedByCaptainEmail(subId, name, email, token, addedBy, levels, teamIds) {
+function sendAddedByCaptainEmail(subId, name, email, token, addedBy, level) {
   var appUrl = getConfig('AppUrl');
-  var teamNames = [];
-  for (var i = 0; i < teamIds.length; i++) teamNames.push(teamById(teamIds[i]).name);
 
   var body =
     'Hi ' + name + ',\n\n' +
     addedBy + ' added you to the tennis sub list.\n\n' +
-    (levels ? 'Levels: ' + levels + '\n' : '') +
-    (teamNames.length ? 'Teams: ' + teamNames.join(', ') + '\n' : '') +
-    "\nThat means you'll get an email when one of those teams needs a sub. " +
-    'You are never obligated to say yes.\n\n' +
-    (appUrl ? 'Open the app to change your levels or teams:\n' + appUrl + '\n\n' : '') +
+    (level ? 'Your level: ' + level + '\n' : '') +
+    "\nThat means you'll get an email when a team at your level or above " +
+    'needs a sub. You are never obligated to say yes.\n\n' +
+    (appUrl ? 'Open the app to change your level:\n' + appUrl + '\n\n' : '') +
     "If you'd rather not be on the list at all:\n" +
     webAppUrl() + '?action=optOut&sub=' + subId + '&token=' + token;
 
