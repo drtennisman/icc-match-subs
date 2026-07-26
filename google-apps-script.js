@@ -8,14 +8,15 @@
  * then redeploy with Deploy → Manage deployments → edit → New version.
  */
 
-var VERSION = 3;
+var VERSION = 4;
 
 /* Sheet tabs are created automatically on first run. */
 var TABS = {
   Config:   ['Key', 'Value'],
   Teams:    ['TeamID', 'Team Name', 'Level', 'Captain', 'Captain Email', 'Active'],
   Subs:     ['SubID', 'Name', 'Email', 'Phone', 'Level', 'Verified',
-             'Token', 'Active', 'Added By', 'Signed Up At', 'Sub Count', 'Last Sub'],
+             'Token', 'Active', 'Added By', 'Signed Up At', 'Sub Count', 'Last Sub',
+             'Season', 'Team Subs'],
   Requests: ['ID', 'TeamID', 'Level', 'Date', 'Time', 'Location', 'Opponent', 'Line',
              'Notes', 'Posted By', 'Posted At', 'Notified', 'Status', 'Claimed By',
              'Claimed At', 'Nudged'],
@@ -26,7 +27,9 @@ var DEFAULT_CONFIG = [
   ['AppUrl', ''],
   ['CaptainPIN', '1234'],
   ['ManagerEmail', ''],
-  ['NudgeHours', '24']
+  ['NudgeHours', '24'],
+  ['Season', '2026 Summer'],
+  ['MaxSubsPerTeam', '3']
 ];
 
 /* ═══════════════════════════════════════════════════════
@@ -170,6 +173,77 @@ function normLevel(v) {
   return n.toFixed(1);
 }
 
+/* ═══════════════════════════════════════════════════════
+   THE 3-PER-TEAM RULE
+
+   A sub may play at most MaxSubsPerTeam matches for any one team per
+   season. Counts are stored per sub as "teamId:count, teamId:count"
+   alongside the season they belong to, so when the season name in Config
+   changes everyone's counts read as zero without editing a single row.
+   ═══════════════════════════════════════════════════════ */
+
+function currentSeason() {
+  return getConfig('Season') || '';
+}
+
+function maxSubsPerTeam() {
+  var n = Number(getConfig('MaxSubsPerTeam'));
+  return (isNaN(n) || n <= 0) ? 3 : n;
+}
+
+function parseTeamSubs(v) {
+  var out = {};
+  var parts = splitList(v);
+  for (var i = 0; i < parts.length; i++) {
+    var bits = parts[i].split(':');
+    if (bits.length !== 2) continue;
+    var id = bits[0].trim();
+    var n = Number(bits[1]);
+    if (id && !isNaN(n) && n > 0) out[id] = n;
+  }
+  return out;
+}
+
+function formatTeamSubs(obj) {
+  var parts = [];
+  for (var id in obj) {
+    if (obj[id] > 0) parts.push(id + ':' + obj[id]);
+  }
+  return parts.join(', ');
+}
+
+/** Counts for a sub row, zeroed out if they belong to a past season. */
+function seasonCountsFor(row) {
+  if (String(row.Season || '').trim() !== currentSeason()) return {};
+  return parseTeamSubs(row['Team Subs']);
+}
+
+/**
+ * Adjusts one sub's count for one team and writes it back. Rolls the record
+ * onto the current season first, so a stale season is never incremented.
+ */
+function bumpTeamSub(subId, teamId, delta) {
+  if (!subId || !teamId) return;
+  var sheet = getSheet('Subs');
+  var row = findRowById(sheet, subId);
+  if (row === -1) return;
+
+  var seasonCol = colIndex(sheet, 'Season');
+  var subsCol   = colIndex(sheet, 'Team Subs');
+  var season    = String(sheet.getRange(row, seasonCol).getValue()).trim();
+
+  var counts;
+  if (season !== currentSeason()) {
+    counts = {};
+    sheet.getRange(row, seasonCol).setValue(currentSeason());
+  } else {
+    counts = parseTeamSubs(sheet.getRange(row, subsCol).getValue());
+  }
+
+  counts[teamId] = Math.max(0, (counts[teamId] || 0) + delta);
+  sheet.getRange(row, subsCol).setValue(formatTeamSubs(counts));
+}
+
 /** Sheet cells come back as Date objects or strings — normalize to YYYY-MM-DD. */
 function toDateString(v) {
   if (!v) return '';
@@ -253,6 +327,8 @@ function loadSubs() {
       email: normEmail(r.Email),
       phone: String(r.Phone || '').trim(),
       level: normLevel(r.Level),
+      season: currentSeason(),
+      teamSubs: seasonCountsFor(r),
       verified: isTrue(r.Verified),
       addedBy: String(r['Added By'] || '').trim(),
       subCount: Number(r['Sub Count']) || 0,
@@ -323,6 +399,7 @@ function scrubSubs(subs, isCaptain) {
     var s = subs[i];
     out.push({
       id: s.id, name: s.name, level: s.level,
+      season: s.season, teamSubs: s.teamSubs,
       verified: s.verified, subCount: s.subCount, lastSub: s.lastSub,
       email: '', phone: ''
     });
@@ -370,6 +447,8 @@ function doGet(e) {
           status: 'ok',
           version: VERSION,
           captain: isCaptain,
+          season: currentSeason(),
+          maxSubsPerTeam: maxSubsPerTeam(),
           teams: scrubTeams(loadTeams(), isCaptain),
           subs: scrubSubs(loadSubs(), isCaptain),
           requests: loadRequests()
@@ -479,7 +558,7 @@ function actionSignup(data) {
   var tok = makeToken();
   sheet.appendRow([
     id, name, email, data.phone || '', normLevel(data.level),
-    false, tok, true, '', new Date(), 0, ''
+    false, tok, true, '', new Date(), 0, '', currentSeason(), ''
   ]);
 
   sendVerifyEmail(id, name, email, tok);
@@ -517,7 +596,8 @@ function actionAddSub(data) {
   var tok = makeToken();
   sheet.appendRow([
     id, name, email, data.phone || '', normLevel(data.level),
-    true, tok, true, String(data.addedBy || 'a captain'), new Date(), 0, ''
+    true, tok, true, String(data.addedBy || 'a captain'), new Date(), 0, '',
+    currentSeason(), ''
   ]);
 
   sendAddedByCaptainEmail(id, name, email, tok, String(data.addedBy || 'A captain'),
@@ -584,15 +664,39 @@ function actionClaim(data) {
   var sub = subById(data.subId);
   if (!sub) return { status: 'error', message: 'We could not find you on the sub list.' };
 
+  var teamId = String(sheet.getRange(row, colIndex(sheet, 'TeamID')).getValue()).trim();
+  var team = teamById(teamId);
+  var cap = maxSubsPerTeam();
+  var used = (sub.teamSubs || {})[teamId] || 0;
+
+  /*
+   * Enforced here, not just in the picker. The one-tap link in a notification
+   * email bypasses the UI entirely, so this is the only place that can
+   * actually stop a sub exceeding the per-team limit.
+   */
+  if (used >= cap) {
+    return {
+      status: 'error',
+      message: 'You have already subbed ' + cap + ' times for ' + team.name +
+               ' this season, which is the limit.'
+    };
+  }
+
   sheet.getRange(row, statusCol).setValue('filled');
   sheet.getRange(row, colIndex(sheet, 'Claimed By')).setValue(sub.id);
   sheet.getRange(row, colIndex(sheet, 'Claimed At')).setValue(new Date());
 
   bumpSubCount(sub.id, 1);
+  bumpTeamSub(sub.id, teamId, 1);
   logHistory(data.id, sub);
   notifyCaptainOfClaim(data.id, sub);
 
-  return { status: 'ok', message: 'Confirmed — the captain has been notified.' };
+  var left = cap - (used + 1);
+  return {
+    status: 'ok',
+    message: 'Confirmed — the captain has been notified.',
+    subsLeftForTeam: left
+  };
 }
 
 function actionWithdraw(data) {
@@ -601,12 +705,15 @@ function actionWithdraw(data) {
   if (row === -1) return { status: 'error', message: 'That match is no longer listed.' };
 
   var sub = subById(data.subId);
+  var teamId = String(sheet.getRange(row, colIndex(sheet, 'TeamID')).getValue()).trim();
+
   sheet.getRange(row, colIndex(sheet, 'Status')).setValue('open');
   sheet.getRange(row, colIndex(sheet, 'Claimed By')).setValue('');
   sheet.getRange(row, colIndex(sheet, 'Claimed At')).setValue('');
   sheet.getRange(row, colIndex(sheet, 'Nudged')).setValue(false);
 
-  if (sub) bumpSubCount(sub.id, -1);
+  /* Backing out gives the slot back — it should not count against them. */
+  if (sub) { bumpSubCount(sub.id, -1); bumpTeamSub(sub.id, teamId, -1); }
   notifyCaptainOfWithdrawal(data.id, sub);
 
   return { status: 'ok', message: 'The captain has been notified and the spot is open again.' };
@@ -777,9 +884,13 @@ function notifySubsOfRequest(requestId, subIds) {
   var url = webAppUrl();
   var sent = 0;
 
+  var cap = maxSubsPerTeam();
+
   for (var j = 0; j < subIds.length; j++) {
     var sub = subById(subIds[j]);
     if (!sub || !sub.email || !sub.verified) continue;
+    /* Don't invite someone who would be turned away when they tap the link. */
+    if (((sub.teamSubs || {})[req.teamId] || 0) >= cap) continue;
 
     var claimUrl = url + '?action=claimFromEmail&r=' + req.id +
                    '&sub=' + sub.id + '&token=' + subToken(sub.id);

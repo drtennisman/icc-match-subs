@@ -550,7 +550,7 @@
 /* ═══════════════════════════════════════════════════════
    CONFIG
    ═══════════════════════════════════════════════════════ */
-const APP_VERSION = 3; // must match VERSION in google-apps-script.js
+const APP_VERSION = 4; // must match VERSION in google-apps-script.js
 
 /*
  * Paste the deployed Apps Script Web App URL here once it exists.
@@ -574,8 +574,12 @@ const LEVELS = ['2.5', '3.0', '3.5', '4.0', '4.5', '5.0'];
  * MUST re-check the cap on claim, because two subs can hit "I'll sub" at the
  * same moment and a browser-side check can't stop that.
  */
-const MAX_SUBS_PER_TEAM = 3;
-const CURRENT_SEASON = '2026 Summer';
+/*
+ * Defaults only — both are overwritten from the Config tab on every load, so
+ * rolling to a new season is a one-cell edit in the Sheet with no redeploy.
+ */
+let MAX_SUBS_PER_TEAM = 3;
+let CURRENT_SEASON = '2026 Summer';
 
 /* ═══════════════════════════════════════════════════════
    LOCAL STATE
@@ -773,12 +777,20 @@ async function postAPI(data) {
 }
 
 /** Pulls Teams / Subs / Requests from the sheet. Cached until something changes. */
+/** The Sheet is the source of truth for the season name and the per-team cap. */
+function applyServerConfig(resp) {
+  if (resp.season) CURRENT_SEASON = resp.season;
+  const cap = Number(resp.maxSubsPerTeam);
+  if (!isNaN(cap) && cap > 0) MAX_SUBS_PER_TEAM = cap;
+}
+
 async function ensureData(force) {
   if (DEMO_MODE) { dataLoaded = true; return true; }
   if (dataLoaded && !force) return true;
   try {
     const resp = await fetchAPI('getData', { pin: me.pin });
     if (resp.status !== 'ok') throw new Error(resp.message || 'Could not load data');
+    applyServerConfig(resp);
     TEAMS = resp.teams || [];
     SUBS = resp.subs || [];
     REQUESTS = resp.requests || [];
@@ -908,6 +920,7 @@ async function verifyCaptainPin() {
   me.role = 'captain';
   saveMe();
 
+  applyServerConfig(resp);
   TEAMS = resp.teams || [];
   SUBS = resp.subs || [];
   REQUESTS = resp.requests || [];
