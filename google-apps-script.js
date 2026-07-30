@@ -8,7 +8,7 @@
  * then redeploy with Deploy → Manage deployments → edit → New version.
  */
 
-var VERSION = 5;
+var VERSION = 6;
 
 /* Sheet tabs are created automatically on first run. */
 var TABS = {
@@ -455,7 +455,13 @@ function doGet(e) {
     switch (action) {
 
       case 'ping':
-        return jsonResponse({ status: 'ok', version: VERSION });
+        return jsonResponse({
+          status: 'ok',
+          version: VERSION,
+          /* Surfaced so a broken link in an email can be diagnosed without
+             guessing at what getUrl() resolved to. */
+          webAppUrl: webAppUrl()
+        });
 
       /*
        * Sub contact details are only returned to a caller who knows the
@@ -861,10 +867,73 @@ function handleOptOut(subId, token) {
    EMAILS
    ═══════════════════════════════════════════════════════ */
 
+/**
+ * Every email goes out as HTML with real <a> buttons.
+ *
+ * These links run past 190 characters. Pasted bare into a plain-text email
+ * they get wrapped by the receiving client, which then hyperlinks only the
+ * first fragment — the recipient taps it and lands on a broken page. An
+ * anchor tag cannot be split that way. A plain-text alternative still goes
+ * along for clients that refuse HTML.
+ */
+function esc_(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function emailHtml(opts) {
+  var rows = '';
+  var details = opts.details || [];
+  for (var i = 0; i < details.length; i++) {
+    rows += '<tr>' +
+      '<td style="padding:4px 14px 4px 0;color:#777;font-size:14px;white-space:nowrap;">' +
+        esc_(details[i][0]) + '</td>' +
+      '<td style="padding:4px 0;color:#1a1a1a;font-size:14px;font-weight:600;">' +
+        esc_(details[i][1]) + '</td>' +
+    '</tr>';
+  }
+
+  /* Declared explicitly so the em-dashes and curly quotes in this content
+     can't arrive as mojibake in a client that guesses the encoding. */
+  return '<!doctype html><html><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;">' +
+    '<div style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif;' +
+      'background:#f0f4f0;padding:24px 12px;">' +
+    '<div style="max-width:480px;margin:0 auto;background:#fff;border-radius:14px;' +
+        'padding:26px 24px;box-shadow:0 1px 6px rgba(0,0,0,.08);">' +
+      '<h1 style="margin:0 0 6px;font-size:19px;color:#052d54;">' + esc_(opts.heading) + '</h1>' +
+      (opts.lead ? '<p style="margin:0 0 16px;font-size:15px;color:#555;line-height:1.55;">' +
+          esc_(opts.lead) + '</p>' : '') +
+      (rows ? '<table cellpadding="0" cellspacing="0" style="margin:0 0 18px;">' + rows + '</table>' : '') +
+      (opts.note ? '<div style="background:#f8f9fa;border-radius:8px;padding:11px 13px;margin:0 0 18px;' +
+          'font-size:14px;color:#555;line-height:1.5;">' + esc_(opts.note) + '</div>' : '') +
+      (opts.buttonUrl ? '<a href="' + esc_(opts.buttonUrl) + '" ' +
+          'style="display:inline-block;background:#052d54;color:#fff;text-decoration:none;' +
+          'padding:14px 26px;border-radius:11px;font-weight:700;font-size:16px;">' +
+          esc_(opts.buttonLabel) + '</a>' : '') +
+      (opts.after ? '<p style="margin:18px 0 0;font-size:14px;color:#555;line-height:1.55;">' +
+          opts.after + '</p>' : '') +
+      (opts.footer ? '<p style="margin:22px 0 0;padding-top:14px;border-top:1px solid #eee;' +
+          'font-size:12px;color:#999;line-height:1.5;">' + opts.footer + '</p>' : '') +
+    '</div>' +
+  '</div></body></html>';
+}
+
+function optOutUrl(subId, token) {
+  return webAppUrl() + '?action=optOut&sub=' + subId + '&token=' + (token || subToken(subId));
+}
+
+/** Plain-text footer. The opt-out link is deliberately kept well clear of any
+ *  action link so a mis-tap doesn't quietly remove someone from the list. */
 function emailFooter(sub) {
-  var url = webAppUrl();
-  return '\n\n─────────────\n' +
-    'Stop getting these: ' + url + '?action=optOut&sub=' + sub.id + '&token=' + subToken(sub.id);
+  return '\n\n---\n' +
+    'To stop receiving these, open this link:\n' + optOutUrl(sub.id);
+}
+
+function footerHtml(sub) {
+  return 'Not interested in subbing any more? ' +
+    '<a href="' + esc_(optOutUrl(sub.id)) + '" style="color:#999;">Take me off the list</a>.';
 }
 
 function subToken(subId) {
@@ -881,8 +950,21 @@ function sendVerifyEmail(subId, name, email, token) {
     'Confirm your spot on the tennis sub list by opening this link:\n\n' + url + '\n\n' +
     "Until you do, you won't receive any match requests.\n\n" +
     "If you didn't sign up, just ignore this email.";
+
+  var html = emailHtml({
+    heading: 'Confirm your spot',
+    lead: 'Hi ' + name + ' — one tap and you\'re on the sub list.',
+    buttonUrl: url,
+    buttonLabel: 'Confirm my spot',
+    after: "Until you do, you won't get any match requests.",
+    footer: "Didn't sign up? Just ignore this email and nothing happens."
+  });
+
   try {
-    MailApp.sendEmail({ to: email, subject: 'Confirm your spot on the sub list', body: body });
+    MailApp.sendEmail({
+      to: email, subject: 'Confirm your spot on the sub list',
+      body: body, htmlBody: html
+    });
   } catch (err) {
     Logger.log('Verify email failed for ' + email + ': ' + err);
   }
@@ -898,11 +980,25 @@ function sendAddedByCaptainEmail(subId, name, email, token, addedBy, level) {
     "\nThat means you'll get an email when a team at your level or above " +
     'needs a sub. You are never obligated to say yes.\n\n' +
     (appUrl ? 'Open the app to change your level:\n' + appUrl + '\n\n' : '') +
-    "If you'd rather not be on the list at all:\n" +
-    webAppUrl() + '?action=optOut&sub=' + subId + '&token=' + token;
+    "If you'd rather not be on the list at all:\n" + optOutUrl(subId, token);
+
+  var html = emailHtml({
+    heading: addedBy + ' added you to the sub list',
+    lead: 'Hi ' + name + " — you'll get an email when a team at your level or above needs a sub. " +
+          'You are never obligated to say yes.',
+    details: level ? [['Your level', level]] : [],
+    buttonUrl: appUrl || '',
+    buttonLabel: 'Open the app',
+    after: appUrl ? 'You can change your level there any time.' : '',
+    footer: "Rather not be on the list? " +
+      '<a href="' + esc_(optOutUrl(subId, token)) + '" style="color:#999;">Take me off</a>.'
+  });
 
   try {
-    MailApp.sendEmail({ to: email, subject: "You've been added to the tennis sub list", body: body });
+    MailApp.sendEmail({
+      to: email, subject: "You've been added to the tennis sub list",
+      body: body, htmlBody: html
+    });
   } catch (err) {
     Logger.log('Added-by-captain email failed for ' + email + ': ' + err);
   }
@@ -929,6 +1025,13 @@ function notifySubsOfRequest(requestId, subIds) {
     var claimUrl = url + '?action=claimFromEmail&r=' + req.id +
                    '&sub=' + sub.id + '&token=' + subToken(sub.id);
 
+    var details = [
+      ['When', prettyDate(req.date) + ' at ' + prettyTime(req.time)],
+      ['Where', req.location]
+    ];
+    if (req.opponent) details.push(['Vs', req.opponent]);
+    details.push(['Level', req.level]);
+
     var body =
       'Hi ' + sub.name + ',\n\n' +
       team.name + ' needs a sub.\n\n' +
@@ -937,15 +1040,26 @@ function notifySubsOfRequest(requestId, subIds) {
       (req.opponent ? 'Vs:    ' + req.opponent + '\n' : '') +
       'Level: ' + req.level + '\n' +
       (req.notes ? '\nNotes from ' + req.postedBy + ':\n' + req.notes + '\n' : '') +
-      '\nFirst to accept gets the spot:\n' + claimUrl + '\n\n' +
-      (getConfig('AppUrl') ? 'Or open the app: ' + getConfig('AppUrl') + '\n' : '') +
+      '\nFirst to accept gets the spot. Open this link to take it:\n' + claimUrl + '\n' +
       emailFooter(sub);
+
+    var html = emailHtml({
+      heading: team.name + ' needs a sub',
+      lead: 'Hi ' + sub.name + ' — first to accept gets the spot.',
+      details: details,
+      note: req.notes ? 'From ' + req.postedBy + ': ' + req.notes : '',
+      buttonUrl: claimUrl,
+      buttonLabel: "Yes, I'll sub",
+      after: 'Nothing is confirmed until you tap that button.',
+      footer: footerHtml(sub)
+    });
 
     try {
       MailApp.sendEmail({
         to: sub.email,
         subject: 'Sub needed — ' + team.name + ', ' + prettyDate(req.date),
-        body: body
+        body: body,
+        htmlBody: html
       });
       sent++;
     } catch (err) {
