@@ -8,7 +8,7 @@
  * then redeploy with Deploy → Manage deployments → edit → New version.
  */
 
-var VERSION = 4;
+var VERSION = 5;
 
 /* Sheet tabs are created automatically on first run. */
 var TABS = {
@@ -17,7 +17,7 @@ var TABS = {
   Subs:     ['SubID', 'Name', 'Email', 'Phone', 'Level', 'Verified',
              'Token', 'Active', 'Added By', 'Signed Up At', 'Sub Count', 'Last Sub',
              'Season', 'Team Subs'],
-  Requests: ['ID', 'TeamID', 'Level', 'Date', 'Time', 'Location', 'Opponent', 'Line',
+  Requests: ['ID', 'TeamID', 'Level', 'Date', 'Time', 'Location', 'Opponent',
              'Notes', 'Posted By', 'Posted At', 'Notified', 'Status', 'Claimed By',
              'Claimed At', 'Nudged'],
   History:  ['Request ID', 'Team', 'Match Date', 'Sub Name', 'Sub Email', 'Claimed At', 'Posted By']
@@ -71,6 +71,24 @@ function sheetToObjects(sheet) {
     out.push(obj);
   }
   return out;
+}
+
+/**
+ * Appends a row by matching object keys to the sheet's actual header names.
+ *
+ * Positional appendRow breaks silently whenever a column is added or removed:
+ * every value after the gap shifts one cell left and the data looks plausible
+ * but is wrong. Matching on headers means the sheet and the code can drift
+ * without corrupting anything.
+ */
+function appendByHeader(sheet, obj) {
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var row = [];
+  for (var i = 0; i < headers.length; i++) {
+    var key = headers[i];
+    row.push(obj[key] === undefined ? '' : obj[key]);
+  }
+  sheet.appendRow(row);
 }
 
 function findRowById(sheet, id) {
@@ -356,7 +374,6 @@ function loadRequests() {
       time: toTimeString(r.Time),
       location: String(r.Location || '').trim(),
       opponent: String(r.Opponent || '').trim(),
-      line: String(r.Line || '').trim(),
       notes: String(r.Notes || '').trim(),
       postedBy: String(r['Posted By'] || '').trim(),
       postedAt: r['Posted At'] ? new Date(r['Posted At']).toISOString() : '',
@@ -560,10 +577,12 @@ function actionSignup(data) {
 
   var id = newId('s');
   var tok = makeToken();
-  sheet.appendRow([
-    id, name, email, data.phone || '', normLevel(data.level),
-    false, tok, true, '', new Date(), 0, '', currentSeason(), ''
-  ]);
+  appendByHeader(sheet, {
+    'SubID': id, 'Name': name, 'Email': email, 'Phone': data.phone || '',
+    'Level': normLevel(data.level), 'Verified': false, 'Token': tok, 'Active': true,
+    'Added By': '', 'Signed Up At': new Date(), 'Sub Count': 0, 'Last Sub': '',
+    'Season': currentSeason(), 'Team Subs': ''
+  });
 
   sendVerifyEmail(id, name, email, tok);
   return { status: 'ok', subId: id, verified: false, message: 'Confirmation email sent.' };
@@ -598,11 +617,12 @@ function actionAddSub(data) {
 
   var id = newId('s');
   var tok = makeToken();
-  sheet.appendRow([
-    id, name, email, data.phone || '', normLevel(data.level),
-    true, tok, true, String(data.addedBy || 'a captain'), new Date(), 0, '',
-    currentSeason(), ''
-  ]);
+  appendByHeader(sheet, {
+    'SubID': id, 'Name': name, 'Email': email, 'Phone': data.phone || '',
+    'Level': normLevel(data.level), 'Verified': true, 'Token': tok, 'Active': true,
+    'Added By': String(data.addedBy || 'a captain'), 'Signed Up At': new Date(),
+    'Sub Count': 0, 'Last Sub': '', 'Season': currentSeason(), 'Team Subs': ''
+  });
 
   sendAddedByCaptainEmail(id, name, email, tok, String(data.addedBy || 'A captain'),
                           normLevel(data.level));
@@ -617,13 +637,21 @@ function actionPostRequest(data) {
   var notified = data.notified || [];
   if (!notified.length) return { status: 'error', message: 'Pick at least one sub to notify.' };
 
+  /* The team determines the level — never trust a level sent by the client. */
+  var team = teamById(String(data.teamId).trim());
+  if (!team || !team.level) {
+    return { status: 'error', message: 'That team is not set up with a level on the Teams tab.' };
+  }
+
   var id = newId('r');
-  getSheet('Requests').appendRow([
-    id, data.teamId, data.level, data.date, data.time,
-    data.location || '', data.opponent || '', data.line || '', data.notes || '',
-    data.postedBy || '', new Date(), notified.join(', '),
-    'open', '', '', false
-  ]);
+  appendByHeader(getSheet('Requests'), {
+    'ID': id, 'TeamID': team.id, 'Level': team.level,
+    'Date': data.date, 'Time': data.time,
+    'Location': data.location || '', 'Opponent': data.opponent || '',
+    'Notes': data.notes || '', 'Posted By': data.postedBy || '',
+    'Posted At': new Date(), 'Notified': notified.join(', '),
+    'Status': 'open', 'Claimed By': '', 'Claimed At': '', 'Nudged': false
+  });
 
   var sent = notifySubsOfRequest(id, notified);
   return { status: 'ok', id: id, emailed: sent, message: 'Posted — ' + sent + ' notified.' };
@@ -748,9 +776,11 @@ function logHistory(requestId, sub) {
   for (var i = 0; i < reqs.length; i++) {
     if (reqs[i].id === requestId) {
       var team = teamById(reqs[i].teamId);
-      getSheet('History').appendRow([
-        requestId, team.name, reqs[i].date, sub.name, sub.email, new Date(), reqs[i].postedBy
-      ]);
+      appendByHeader(getSheet('History'), {
+        'Request ID': requestId, 'Team': team.name, 'Match Date': reqs[i].date,
+        'Sub Name': sub.name, 'Sub Email': sub.email,
+        'Claimed At': new Date(), 'Posted By': reqs[i].postedBy
+      });
       return;
     }
   }
@@ -905,7 +935,6 @@ function notifySubsOfRequest(requestId, subIds) {
       'When:  ' + prettyDate(req.date) + ' at ' + prettyTime(req.time) + '\n' +
       'Where: ' + req.location + '\n' +
       (req.opponent ? 'Vs:    ' + req.opponent + '\n' : '') +
-      (req.line ? 'Line:  ' + req.line + '\n' : '') +
       'Level: ' + req.level + '\n' +
       (req.notes ? '\nNotes from ' + req.postedBy + ':\n' + req.notes + '\n' : '') +
       '\nFirst to accept gets the spot:\n' + claimUrl + '\n\n' +
@@ -941,7 +970,6 @@ function notifyCaptainOfClaim(requestId, sub) {
     'Match: ' + team.name + '\n' +
     'When:  ' + prettyDate(req.date) + ' at ' + prettyTime(req.time) + '\n' +
     'Where: ' + req.location + '\n' +
-    (req.line ? 'Line:  ' + req.line + '\n' : '') +
     '\nReach ' + sub.name + ':\n' +
     '  ' + sub.email + '\n' +
     (sub.phone ? '  ' + sub.phone + '\n' : '') +

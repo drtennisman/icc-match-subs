@@ -368,8 +368,9 @@
       <h2>Post a match</h2>
       <p class="card-sub">Fill in the match, then you'll pick exactly who gets notified.</p>
 
-      <div class="form-group">
-        <label for="pTeam">Team</label>
+      <div id="pTeamFixed" class="notice notice-info" style="display:none;"></div>
+      <div class="form-group" id="pTeamPickerWrap" style="display:none;">
+        <label for="pTeam">Which of your teams?</label>
         <select id="pTeam" onchange="onPostTeamChange()"></select>
       </div>
       <div class="form-row">
@@ -386,27 +387,9 @@
         <label for="pLocation">Location</label>
         <input type="text" id="pLocation" placeholder="Inverness Country Club">
       </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label for="pOpponent">Opponent <span style="font-weight:400;color:#999;">(optional)</span></label>
-          <input type="text" id="pOpponent" placeholder="Riverchase">
-        </div>
-        <div class="form-group">
-          <label for="pLine">Line</label>
-          <select id="pLine">
-            <option value="">Not specified</option>
-            <option>Line 1 Singles</option>
-            <option>Line 2 Singles</option>
-            <option>Line 1 Doubles</option>
-            <option>Line 2 Doubles</option>
-            <option>Line 3 Doubles</option>
-          </select>
-        </div>
-      </div>
       <div class="form-group">
-        <label for="pLevel">Level needed</label>
-        <select id="pLevel"></select>
-        <p class="form-hint">Used to group the sub list on the next screen.</p>
+        <label for="pOpponent">Opponent <span style="font-weight:400;color:#999;">(optional)</span></label>
+        <input type="text" id="pOpponent" placeholder="Riverchase">
       </div>
       <div class="form-group">
         <label for="pNotes">Notes <span style="font-weight:400;color:#999;">(optional)</span></label>
@@ -563,7 +546,7 @@
 /* ═══════════════════════════════════════════════════════
    CONFIG
    ═══════════════════════════════════════════════════════ */
-const APP_VERSION = 4; // must match VERSION in google-apps-script.js
+const APP_VERSION = 5; // must match VERSION in google-apps-script.js
 
 /*
  * Paste the deployed Apps Script Web App URL here once it exists.
@@ -635,20 +618,20 @@ let SUBS = [
 let REQUESTS = [
   {
     id:'r1', teamId:'t2', level:'4.0', date:'2026-07-30', time:'18:00',
-    location:'Inverness Country Club', opponent:'Riverchase', line:'Line 2 Doubles',
+    location:'Inverness Country Club', opponent:'Riverchase',
     notes:'Prefer someone comfortable at the net. Match should wrap by 8.',
     postedBy:'Anne Powell', postedAt:'2026-07-24T09:12:00',
     notified:['s1','s2','s3'], status:'open', claimedBy:'', claimedAt:''
   },
   {
     id:'r2', teamId:'t4', level:'4.0', date:'2026-07-27', time:'14:00',
-    location:'Hoover Country Club', opponent:'Greystone', line:'Line 1 Singles',
+    location:'Hoover Country Club', opponent:'Greystone',
     notes:'', postedBy:'J.C. Freeman', postedAt:'2026-07-22T16:40:00',
     notified:['s5','s7'], status:'filled', claimedBy:'s5', claimedAt:'2026-07-22T19:03:00'
   },
   {
     id:'r3', teamId:'t1', level:'3.5', date:'2026-08-06', time:'09:30',
-    location:'Inverness Country Club', opponent:'Vestavia', line:'Line 3 Doubles',
+    location:'Inverness Country Club', opponent:'Vestavia',
     notes:'Early start — courts are booked at 11.',
     postedBy:'Lisa Hardy', postedAt:'2026-07-23T20:15:00',
     notified:['s4','s9'], status:'open', claimedBy:'', claimedAt:''
@@ -1129,7 +1112,6 @@ function matchCardHTML(r, mySubId) {
     '<div class="match-meta">' +
       esc(r.location) +
       (r.opponent ? ' · vs ' + esc(r.opponent) : '') +
-      (r.line ? '<br>' + esc(r.line) : '') +
       '<br>Posted by ' + esc(r.postedBy) +
     '</div>' +
     (r.notes ? '<div class="match-notes">' + esc(r.notes) + '</div>' : '') +
@@ -1241,26 +1223,47 @@ function withdrawMatch(id) {
 /* ═══════════════════════════════════════════════════════
    POST — step 1
    ═══════════════════════════════════════════════════════ */
-function initPostForm() {
-  const sel = document.getElementById('pTeam');
-  const prev = sel.value;
+/** The teams this captain runs, taken from the Captain column on the Teams tab. */
+function myTeams() {
+  if (!me.name) return [];
+  return TEAMS.filter(t => t.captain === me.name);
+}
 
-  // Show this captain's own teams first, but never hide the rest —
-  // co-captains and fill-ins still need to post.
-  const mine = me.name ? TEAMS.filter(t => t.captain === me.name) : [];
-  const rest = TEAMS.filter(t => mine.indexOf(t) === -1);
+/**
+ * We already know who the captain is, so we know their team — no need to ask.
+ * A picker only appears if someone captains more than one team, and there's a
+ * fallback to the full list if their name doesn't match any Captain cell.
+ */
+function initPostForm() {
+  const fixed  = document.getElementById('pTeamFixed');
+  const wrap   = document.getElementById('pTeamPickerWrap');
+  const sel    = document.getElementById('pTeam');
+  const mine   = myTeams();
   const optHtml = t => '<option value="' + t.id + '">' + esc(t.name) + '</option>';
 
-  sel.innerHTML = mine.length
-    ? '<optgroup label="Your teams">' + mine.map(optHtml).join('') + '</optgroup>' +
-      (rest.length ? '<optgroup label="Other teams">' + rest.map(optHtml).join('') + '</optgroup>' : '')
-    : TEAMS.map(optHtml).join('');
-  if (prev) sel.value = prev;
-
-  const lvl = document.getElementById('pLevel');
-  if (!lvl.options.length) {
-    lvl.innerHTML = LEVELS.map(l => '<option value="' + l + '">' + l + '</option>').join('');
+  if (mine.length === 1) {
+    fixed.style.display = '';
+    fixed.innerHTML = 'Posting for <strong>' + esc(mine[0].name) + '</strong> · level ' + esc(mine[0].level);
+    wrap.style.display = 'none';
+    sel.innerHTML = optHtml(mine[0]);
+    sel.value = mine[0].id;
+  } else if (mine.length > 1) {
+    fixed.style.display = 'none';
+    wrap.style.display = '';
+    const prev = sel.value;
+    sel.innerHTML = mine.map(optHtml).join('');
+    if (prev && mine.some(t => t.id === prev)) sel.value = prev;
+  } else {
+    // Name didn't match a captain on the Teams tab — show everything rather
+    // than leaving them stuck with nothing to post for.
+    fixed.style.display = '';
+    fixed.innerHTML = "Your name isn't listed as a captain on the Teams tab, so every team is shown.";
+    wrap.style.display = '';
+    const prev = sel.value;
+    sel.innerHTML = TEAMS.map(optHtml).join('');
+    if (prev) sel.value = prev;
   }
+
   if (!document.getElementById('pLocation').value) {
     document.getElementById('pLocation').value = 'Inverness Country Club';
   }
@@ -1269,7 +1272,14 @@ function initPostForm() {
 
 function onPostTeamChange() {
   const t = teamById(document.getElementById('pTeam').value);
-  if (t.level) document.getElementById('pLevel').value = t.level;
+  const wrap = document.getElementById('pTeamPickerWrap');
+  if (wrap.style.display !== 'none' && t.level) {
+    const fixed = document.getElementById('pTeamFixed');
+    if (myTeams().length > 1) {
+      fixed.style.display = '';
+      fixed.innerHTML = 'Level <strong>' + esc(t.level) + '</strong> — set by the team, not by you.';
+    }
+  }
 }
 
 function goToNotify() {
@@ -1283,18 +1293,19 @@ function goToNotify() {
   if (!loc)  return showToast('Add a location');
   if (daysUntil(date) < 0) return showToast("That date's already passed");
 
+  const team = teamById(teamId);
+  if (!team.level) return showToast('That team has no level set on the Teams tab');
+
   notifyMode = 'new';
   draft = {
     teamId: teamId,
-    level:    document.getElementById('pLevel').value,
+    level: team.level,          // always the team's level, never a separate choice
     date: date, time: time, location: loc,
     opponent: document.getElementById('pOpponent').value.trim(),
-    line:     document.getElementById('pLine').value,
     notes:    document.getElementById('pNotes').value.trim()
   };
   pickedSubs = [];
 
-  const team = teamById(teamId);
   document.getElementById('notifySummary').textContent =
     team.name + ' · ' + fmtDate(date) + ' at ' + fmtTime(time) + ' · ' + draft.level;
 
@@ -1478,7 +1489,7 @@ function confirmNotify() {
           teamId: draft.teamId, level: draft.level,
           date: draft.date, time: draft.time,
           location: draft.location, opponent: draft.opponent,
-          line: draft.line, notes: draft.notes,
+          notes: draft.notes,
           postedBy: postedBy, postedAt: new Date().toISOString(),
           notified: pickedSubs.slice(),
           status: 'open', claimedBy: '', claimedAt: ''
@@ -1492,7 +1503,7 @@ function confirmNotify() {
         teamId: draft.teamId, level: draft.level,
         date: draft.date, time: draft.time,
         location: draft.location, opponent: draft.opponent,
-        line: draft.line, notes: draft.notes,
+        notes: draft.notes,
         postedBy: postedBy, notified: pickedSubs.slice()
       });
 
@@ -1593,8 +1604,7 @@ function renderRequests() {
       '<div class="match-when">' + fmtDate(r.date) + ' at ' + fmtTime(r.time) + '</div>' +
       '<div class="match-meta">' + esc(r.location) +
         (r.opponent ? ' · vs ' + esc(r.opponent) : '') +
-        (r.line ? '<br>' + esc(r.line) : '') +
-      '</div>' +
+        '</div>' +
       (r.notes ? '<div class="match-notes">' + esc(r.notes) + '</div>' : '') +
       body +
     '</div>';
@@ -1608,7 +1618,7 @@ function widenNet(id) {
   notifyMode = 'more';
   draft = {
     teamId: r.teamId, level: r.level, date: r.date, time: r.time,
-    location: r.location, opponent: r.opponent, line: r.line, notes: r.notes,
+    location: r.location, opponent: r.opponent, notes: r.notes,
     existingId: r.id, alreadyNotified: r.notified.slice()
   };
   pickedSubs = r.notified.slice();
