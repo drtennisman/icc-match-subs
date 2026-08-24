@@ -8,7 +8,7 @@
  * then redeploy with Deploy → Manage deployments → edit → New version.
  */
 
-var VERSION = 6;
+var VERSION = 7;
 
 /* Sheet tabs are created automatically on first run. */
 var TABS = {
@@ -17,7 +17,7 @@ var TABS = {
   Subs:     ['SubID', 'Name', 'Email', 'Phone', 'Level', 'Verified',
              'Token', 'Active', 'Added By', 'Signed Up At', 'Sub Count', 'Last Sub',
              'Season', 'Team Subs'],
-  Requests: ['ID', 'TeamID', 'Level', 'Date', 'Time', 'Location', 'Opponent',
+  Requests: ['ID', 'TeamID', 'Level', 'Date', 'Match Type', 'Location', 'Opponent',
              'Notes', 'Posted By', 'Posted At', 'Notified', 'Status', 'Claimed By',
              'Claimed At', 'Nudged'],
   History:  ['Request ID', 'Team', 'Match Date', 'Sub Name', 'Sub Email', 'Claimed At', 'Posted By']
@@ -52,8 +52,33 @@ function getSheet(name) {
     if (name === 'Config') {
       sheet.getRange(2, 1, DEFAULT_CONFIG.length, 2).setValues(DEFAULT_CONFIG);
     }
+  } else if (TABS[name]) {
+    ensureColumns(sheet, TABS[name]);
   }
   return sheet;
+}
+
+/**
+ * Adds any header this version expects but the existing sheet doesn't have.
+ *
+ * Without this, a new column means the value is silently dropped on write
+ * and someone has to be told to delete the tab. Existing columns are left
+ * alone — including ones no longer used — so nothing is ever destroyed.
+ */
+function ensureColumns(sheet, wanted) {
+  var lastCol = sheet.getLastColumn();
+  var existing = lastCol > 0
+    ? sheet.getRange(1, 1, 1, lastCol).getValues()[0]
+    : [];
+
+  var missing = [];
+  for (var i = 0; i < wanted.length; i++) {
+    if (existing.indexOf(wanted[i]) === -1) missing.push(wanted[i]);
+  }
+  if (!missing.length) return;
+
+  sheet.getRange(1, lastCol + 1, 1, missing.length).setValues([missing])
+       .setFontWeight('bold').setBackground('#021f3d').setFontColor('#ffffff');
 }
 
 function sheetToObjects(sheet) {
@@ -170,6 +195,11 @@ function splitList(v) {
 function isTrue(v) {
   var s = String(v).trim().toLowerCase();
   return s === 'true' || s === 'yes' || s === 'y' || s === '1' || s === 'x';
+}
+
+/** At least 10 digits, so "n/a" or a stray word doesn't pass as a number. */
+function hasUsablePhone(v) {
+  return String(v || '').replace(/\D/g, '').length >= 10;
 }
 
 function normEmail(e) {
@@ -371,7 +401,7 @@ function loadRequests() {
       teamId: String(r.TeamID).trim(),
       level: normLevel(r.Level),
       date: toDateString(r.Date),
-      time: toTimeString(r.Time),
+      matchType: String(r['Match Type'] || '').trim(),
       location: String(r.Location || '').trim(),
       opponent: String(r.Opponent || '').trim(),
       notes: String(r.Notes || '').trim(),
@@ -556,6 +586,10 @@ function actionSignup(data) {
   var email = normEmail(data.email);
   if (!name)  return { status: 'error', message: 'Name is required.' };
   if (!email || email.indexOf('@') === -1) return { status: 'error', message: 'A valid email is required.' };
+  /* Captains text their sub once the spot is taken, so a number is required. */
+  if (!hasUsablePhone(data.phone)) {
+    return { status: 'error', message: 'A cell phone number is required so the captain can text you.' };
+  }
 
   var sheet = getSheet('Subs');
   var rows = sheetToObjects(sheet);
@@ -612,6 +646,10 @@ function actionAddSub(data) {
   var email = normEmail(data.email);
   if (!name)  return { status: 'error', message: 'Name is required.' };
   if (!email || email.indexOf('@') === -1) return { status: 'error', message: 'A valid email is required.' };
+  /* Captains text their sub once the spot is taken, so a number is required. */
+  if (!hasUsablePhone(data.phone)) {
+    return { status: 'error', message: 'A cell phone number is required so the captain can text you.' };
+  }
 
   var sheet = getSheet('Subs');
   var rows = sheetToObjects(sheet);
@@ -652,7 +690,7 @@ function actionPostRequest(data) {
   var id = newId('r');
   appendByHeader(getSheet('Requests'), {
     'ID': id, 'TeamID': team.id, 'Level': team.level,
-    'Date': data.date, 'Time': data.time,
+    'Date': data.date, 'Match Type': data.matchType || '',
     'Location': data.location || '', 'Opponent': data.opponent || '',
     'Notes': data.notes || '', 'Posted By': data.postedBy || '',
     'Posted At': new Date(), 'Notified': notified.join(', '),
@@ -839,7 +877,7 @@ function handleClaimFromEmail(requestId, subId, token) {
         var team = teamById(reqs[i].teamId);
         return htmlPage("You're in",
           "You're subbing for " + team.name + ' on ' + prettyDate(reqs[i].date) +
-          ' at ' + prettyTime(reqs[i].time) + ', ' + reqs[i].location +
+          ' - ' + reqs[i].matchType + ', ' + reqs[i].location +
           '. ' + reqs[i].postedBy + ' has been notified.');
       }
     }
@@ -1026,7 +1064,8 @@ function notifySubsOfRequest(requestId, subIds) {
                    '&sub=' + sub.id + '&token=' + subToken(sub.id);
 
     var details = [
-      ['When', prettyDate(req.date) + ' at ' + prettyTime(req.time)],
+      ['When', prettyDate(req.date)],
+      ['Playing', req.matchType],
       ['Where', req.location]
     ];
     if (req.opponent) details.push(['Vs', req.opponent]);
@@ -1035,7 +1074,8 @@ function notifySubsOfRequest(requestId, subIds) {
     var body =
       'Hi ' + sub.name + ',\n\n' +
       team.name + ' needs a sub.\n\n' +
-      'When:  ' + prettyDate(req.date) + ' at ' + prettyTime(req.time) + '\n' +
+      'When:    ' + prettyDate(req.date) + '\n' +
+      'Playing: ' + req.matchType + '\n' +
       'Where: ' + req.location + '\n' +
       (req.opponent ? 'Vs:    ' + req.opponent + '\n' : '') +
       'Level: ' + req.level + '\n' +
@@ -1082,7 +1122,8 @@ function notifyCaptainOfClaim(requestId, sub) {
   var body =
     'Good news — ' + sub.name + ' is subbing.\n\n' +
     'Match: ' + team.name + '\n' +
-    'When:  ' + prettyDate(req.date) + ' at ' + prettyTime(req.time) + '\n' +
+    'When:    ' + prettyDate(req.date) + '\n' +
+    'Playing: ' + req.matchType + '\n' +
     'Where: ' + req.location + '\n' +
     '\nReach ' + sub.name + ':\n' +
     '  ' + sub.email + '\n' +
@@ -1112,7 +1153,7 @@ function notifyCaptainOfWithdrawal(requestId, sub) {
 
   var body =
     (sub ? sub.name : 'Your sub') + ' can no longer play ' + team.name +
-    ' on ' + prettyDate(req.date) + ' at ' + prettyTime(req.time) + '.\n\n' +
+    ' on ' + prettyDate(req.date) + ' (' + req.matchType + ').\n\n' +
     'The spot is open again. Open the app to notify more subs:\n' +
     (getConfig('AppUrl') || webAppUrl());
 
@@ -1189,7 +1230,7 @@ function sendNoResponseNudges() {
     var body =
       'Nobody has claimed this match yet:\n\n' +
       team.name + '\n' +
-      prettyDate(matchDate) + ' at ' + prettyTime(toTimeString(r.Time)) + '\n' +
+      prettyDate(matchDate) + ' - ' + String(r['Match Type'] || '') + '\n' +
       String(r.Location || '') + '\n\n' +
       'You notified ' + notifiedCount + ' ' + (notifiedCount === 1 ? 'sub' : 'subs') +
       ' and none have accepted.\n\n' +

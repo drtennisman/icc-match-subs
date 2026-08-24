@@ -325,9 +325,9 @@
         <p class="form-hint">We'll send one confirmation email to make sure this address works.</p>
       </div>
       <div class="form-group">
-        <label for="suPhone">Phone <span style="font-weight:400;color:#999;">(optional)</span></label>
-        <input type="tel" id="suPhone" placeholder="(205) 555-0123" autocomplete="tel">
-        <p class="form-hint">Only shown to captains, so they can text you if a match is same-day.</p>
+        <label for="suPhone">Cell phone</label>
+        <input type="tel" id="suPhone" placeholder="(205) 555-0123" autocomplete="tel" inputmode="tel">
+        <p class="form-hint">Required. Once you accept a match, the captain texts you the details — so this is how they reach you. Only captains ever see it.</p>
       </div>
 
       <div class="form-group">
@@ -379,8 +379,12 @@
           <input type="date" id="pDate">
         </div>
         <div class="form-group">
-          <label for="pTime">Start time</label>
-          <input type="time" id="pTime">
+          <label for="pType">Playing</label>
+          <select id="pType">
+            <option value="Singles">Singles</option>
+            <option value="Doubles">Doubles</option>
+            <option value="Both">Both</option>
+          </select>
         </div>
       </div>
       <div class="form-group">
@@ -488,8 +492,9 @@
         <p class="form-hint">Double-check this — a typo means they silently never hear from you.</p>
       </div>
       <div class="form-group">
-        <label for="asPhone">Their phone <span style="font-weight:400;color:#999;">(optional)</span></label>
-        <input type="tel" id="asPhone" placeholder="(205) 555-0123">
+        <label for="asPhone">Their cell phone</label>
+        <input type="tel" id="asPhone" placeholder="(205) 555-0123" inputmode="tel">
+        <p class="form-hint">Required — it's how you'll text them once they accept.</p>
       </div>
       <div class="form-group">
         <label>Their soft court level</label>
@@ -546,7 +551,7 @@
 /* ═══════════════════════════════════════════════════════
    CONFIG
    ═══════════════════════════════════════════════════════ */
-const APP_VERSION = 6; // must match VERSION in google-apps-script.js
+const APP_VERSION = 7; // must match VERSION in google-apps-script.js
 
 /*
  * Paste the deployed Apps Script Web App URL here once it exists.
@@ -617,20 +622,20 @@ let SUBS = [
 
 let REQUESTS = [
   {
-    id:'r1', teamId:'t2', level:'4.0', date:'2026-07-30', time:'18:00',
+    id:'r1', teamId:'t2', level:'4.0', date:'2026-07-30', matchType:'Doubles',
     location:'Inverness Country Club', opponent:'Riverchase',
     notes:'Prefer someone comfortable at the net. Match should wrap by 8.',
     postedBy:'Anne Powell', postedAt:'2026-07-24T09:12:00',
     notified:['s1','s2','s3'], status:'open', claimedBy:'', claimedAt:''
   },
   {
-    id:'r2', teamId:'t4', level:'4.0', date:'2026-07-27', time:'14:00',
+    id:'r2', teamId:'t4', level:'4.0', date:'2026-07-27', matchType:'Singles',
     location:'Hoover Country Club', opponent:'Greystone',
     notes:'', postedBy:'J.C. Freeman', postedAt:'2026-07-22T16:40:00',
     notified:['s5','s7'], status:'filled', claimedBy:'s5', claimedAt:'2026-07-22T19:03:00'
   },
   {
-    id:'r3', teamId:'t1', level:'3.5', date:'2026-08-06', time:'09:30',
+    id:'r3', teamId:'t1', level:'3.5', date:'2026-08-06', matchType:'Both',
     location:'Inverness Country Club', opponent:'Vestavia',
     notes:'Early start — courts are booked at 11.',
     postedBy:'Lisa Hardy', postedAt:'2026-07-23T20:15:00',
@@ -681,6 +686,11 @@ function bumpTeamSub(s, teamId, delta) {
   else delete s.teamSubs[teamId];
 }
 
+/** At least 10 digits, so "n/a" or a stray word can't pass as a number. */
+function hasUsablePhone(v) {
+  return String(v || '').replace(/\D/g, '').length >= 10;
+}
+
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
     { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]
@@ -694,13 +704,6 @@ function fmtDate(iso) {
   return dt.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' });
 }
 
-function fmtTime(t) {
-  if (!t) return '';
-  const [h, m] = t.split(':').map(Number);
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  const hr = h % 12 === 0 ? 12 : h % 12;
-  return hr + ':' + String(m).padStart(2, '0') + ' ' + ampm;
-}
 
 function daysUntil(iso) {
   if (!iso) return 999;
@@ -954,6 +957,7 @@ async function submitSignup() {
 
   if (!name)  return showToast('Add your name');
   if (!email || email.indexOf('@') === -1 || email.indexOf('.') === -1) return showToast('Check your email address');
+  if (!hasUsablePhone(phone)) return showToast('Add your cell number — captains text you once you accept');
   if (!me.level) return showToast('Pick your level');
 
   me.name = name; me.email = email; me.phone = phone;
@@ -1064,7 +1068,7 @@ function renderMatches() {
     .filter(r => r.notified.indexOf(mySubId) !== -1)
     .filter(r => r.status !== 'cancelled')
     .filter(r => r.claimedBy === mySubId || hidden.indexOf(r.id) === -1)
-    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+    .sort((a, b) => a.date.localeCompare(b.date));
 
   if (mine.length === 0) {
     box.innerHTML = '<div class="card"><div class="empty">' +
@@ -1108,7 +1112,7 @@ function matchCardHTML(r, mySubId) {
     '<div class="match-team">' + esc(team.name) +
       '<span class="badge badge-level">' + esc(r.level) + '</span>' + statusBadge +
     '</div>' +
-    '<div class="match-when">' + fmtDate(r.date) + ' at ' + fmtTime(r.time) + '</div>' +
+    '<div class="match-when">' + fmtDate(r.date) + ' · ' + esc(r.matchType) + '</div>' +
     '<div class="match-meta">' +
       esc(r.location) +
       (r.opponent ? ' · vs ' + esc(r.opponent) : '') +
@@ -1144,7 +1148,7 @@ function claimMatch(id) {
 
   showModal(
     'Confirm you can play',
-    'You\'re committing to ' + team.name + ' on ' + fmtDate(r.date) + ' at ' + fmtTime(r.time) +
+    'You\'re committing to ' + team.name + ' on ' + fmtDate(r.date) + ' (' + r.matchType + ')' +
     ' at ' + r.location + '. ' + r.postedBy + ' will be notified right away.',
     "Yes, I'll sub",
     async () => {
@@ -1285,11 +1289,11 @@ function onPostTeamChange() {
 function goToNotify() {
   const teamId = document.getElementById('pTeam').value;
   const date   = document.getElementById('pDate').value;
-  const time   = document.getElementById('pTime').value;
+  const type   = document.getElementById('pType').value;
   const loc    = document.getElementById('pLocation').value.trim();
 
   if (!date) return showToast('Pick a match date');
-  if (!time) return showToast('Pick a start time');
+  if (!type) return showToast('Pick singles, doubles or both');
   if (!loc)  return showToast('Add a location');
   if (daysUntil(date) < 0) return showToast("That date's already passed");
 
@@ -1300,14 +1304,14 @@ function goToNotify() {
   draft = {
     teamId: teamId,
     level: team.level,          // always the team's level, never a separate choice
-    date: date, time: time, location: loc,
+    date: date, matchType: type, location: loc,
     opponent: document.getElementById('pOpponent').value.trim(),
     notes:    document.getElementById('pNotes').value.trim()
   };
   pickedSubs = [];
 
   document.getElementById('notifySummary').textContent =
-    team.name + ' · ' + fmtDate(date) + ' at ' + fmtTime(time) + ' · ' + draft.level;
+    team.name + ' · ' + fmtDate(date) + ' · ' + type + ' · ' + draft.level;
 
   renderSubPicker();
   showScreen('notifyScreen');
@@ -1487,7 +1491,7 @@ function confirmNotify() {
         REQUESTS.unshift({
           id: 'r' + Date.now(),
           teamId: draft.teamId, level: draft.level,
-          date: draft.date, time: draft.time,
+          date: draft.date, matchType: draft.matchType,
           location: draft.location, opponent: draft.opponent,
           notes: draft.notes,
           postedBy: postedBy, postedAt: new Date().toISOString(),
@@ -1501,7 +1505,7 @@ function confirmNotify() {
       const resp = await postAPI({
         action: 'postRequest',
         teamId: draft.teamId, level: draft.level,
-        date: draft.date, time: draft.time,
+        date: draft.date, matchType: draft.matchType,
         location: draft.location, opponent: draft.opponent,
         notes: draft.notes,
         postedBy: postedBy, notified: pickedSubs.slice()
@@ -1516,7 +1520,7 @@ function confirmNotify() {
 
 function finishPost(msg) {
   draft = null; pickedSubs = []; notifyMode = 'new';
-  ['pDate', 'pTime', 'pOpponent', 'pNotes'].forEach(id => {
+  ['pDate', 'pOpponent', 'pNotes'].forEach(id => {
     document.getElementById(id).value = '';
   });
   navigate('requestsScreen', document.getElementById('tabRequests'));
@@ -1558,7 +1562,7 @@ function renderRequests() {
   const box = document.getElementById('requestsList');
   const list = REQUESTS
     .filter(r => r.status !== 'cancelled')
-    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+    .sort((a, b) => a.date.localeCompare(b.date));
 
   if (list.length === 0) {
     box.innerHTML = '<div class="card"><div class="empty">' +
@@ -1601,7 +1605,7 @@ function renderRequests() {
       '<div class="match-team">' + esc(team.name) +
         '<span class="badge badge-level">' + esc(r.level) + '</span>' + statusBadge + urgentBadge +
       '</div>' +
-      '<div class="match-when">' + fmtDate(r.date) + ' at ' + fmtTime(r.time) + '</div>' +
+      '<div class="match-when">' + fmtDate(r.date) + ' · ' + esc(r.matchType) + '</div>' +
       '<div class="match-meta">' + esc(r.location) +
         (r.opponent ? ' · vs ' + esc(r.opponent) : '') +
         '</div>' +
@@ -1617,7 +1621,7 @@ function widenNet(id) {
 
   notifyMode = 'more';
   draft = {
-    teamId: r.teamId, level: r.level, date: r.date, time: r.time,
+    teamId: r.teamId, level: r.level, date: r.date, matchType: r.matchType,
     location: r.location, opponent: r.opponent, notes: r.notes,
     existingId: r.id, alreadyNotified: r.notified.slice()
   };
@@ -1778,6 +1782,7 @@ async function submitAddSub() {
 
   if (!name)  return showToast('Add their name');
   if (!email || email.indexOf('@') === -1 || email.indexOf('.') === -1) return showToast('Check the email address');
+  if (!hasUsablePhone(phone)) return showToast("Add their cell number — you'll text them once they accept");
   if (!addSubDraft.level) return showToast('Pick their level');
 
   showModal('Add ' + name + '?',
