@@ -379,13 +379,17 @@
           <input type="date" id="pDate">
         </div>
         <div class="form-group">
-          <label for="pType">Playing</label>
-          <select id="pType">
-            <option value="Singles">Singles</option>
-            <option value="Doubles">Doubles</option>
-            <option value="Both">Both</option>
-          </select>
+          <label for="pTime">Start time <span style="font-weight:400;color:#999;">(optional)</span></label>
+          <input type="time" id="pTime">
         </div>
+      </div>
+      <div class="form-group">
+        <label for="pType">Playing</label>
+        <select id="pType">
+          <option value="Singles">Singles</option>
+          <option value="Doubles">Doubles</option>
+          <option value="Both">Both</option>
+        </select>
       </div>
       <div class="form-group">
         <label for="pLocation">Location</label>
@@ -551,7 +555,7 @@
 /* ═══════════════════════════════════════════════════════
    CONFIG
    ═══════════════════════════════════════════════════════ */
-const APP_VERSION = 7; // must match VERSION in google-apps-script.js
+const APP_VERSION = 8; // must match VERSION in google-apps-script.js
 
 /*
  * Paste the deployed Apps Script Web App URL here once it exists.
@@ -622,20 +626,20 @@ let SUBS = [
 
 let REQUESTS = [
   {
-    id:'r1', teamId:'t2', level:'4.0', date:'2026-07-30', matchType:'Doubles',
+    id:'r1', teamId:'t2', level:'4.0', date:'2026-07-30', time:'18:00', matchType:'Doubles',
     location:'Inverness Country Club', opponent:'Riverchase',
     notes:'Prefer someone comfortable at the net. Match should wrap by 8.',
     postedBy:'Anne Powell', postedAt:'2026-07-24T09:12:00',
     notified:['s1','s2','s3'], status:'open', claimedBy:'', claimedAt:''
   },
   {
-    id:'r2', teamId:'t4', level:'4.0', date:'2026-07-27', matchType:'Singles',
+    id:'r2', teamId:'t4', level:'4.0', date:'2026-07-27', time:'', matchType:'Singles',
     location:'Hoover Country Club', opponent:'Greystone',
     notes:'', postedBy:'J.C. Freeman', postedAt:'2026-07-22T16:40:00',
     notified:['s5','s7'], status:'filled', claimedBy:'s5', claimedAt:'2026-07-22T19:03:00'
   },
   {
-    id:'r3', teamId:'t1', level:'3.5', date:'2026-08-06', matchType:'Both',
+    id:'r3', teamId:'t1', level:'3.5', date:'2026-08-06', time:'09:30', matchType:'Both',
     location:'Inverness Country Club', opponent:'Vestavia',
     notes:'Early start — courts are booked at 11.',
     postedBy:'Lisa Hardy', postedAt:'2026-07-23T20:15:00',
@@ -684,6 +688,23 @@ function bumpTeamSub(s, teamId, delta) {
   const next = (s.teamSubs[teamId] || 0) + delta;
   if (next > 0) s.teamSubs[teamId] = next;
   else delete s.teamSubs[teamId];
+}
+
+function fmtTime(t) {
+  if (!t) return '';
+  const [h, m] = String(t).split(':').map(Number);
+  if (isNaN(h)) return '';
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const hr = h % 12 === 0 ? 12 : h % 12;
+  return hr + ':' + String(m).padStart(2, '0') + ' ' + ampm;
+}
+
+/** "Sat, Sep 12 · 6:00 PM · Doubles", skipping the time when it wasn't given. */
+function matchWhen(r) {
+  const bits = [fmtDate(r.date)];
+  if (r.time) bits.push(fmtTime(r.time));
+  if (r.matchType) bits.push(r.matchType);
+  return bits.join(' · ');
 }
 
 /** At least 10 digits, so "n/a" or a stray word can't pass as a number. */
@@ -1112,7 +1133,7 @@ function matchCardHTML(r, mySubId) {
     '<div class="match-team">' + esc(team.name) +
       '<span class="badge badge-level">' + esc(r.level) + '</span>' + statusBadge +
     '</div>' +
-    '<div class="match-when">' + fmtDate(r.date) + ' · ' + esc(r.matchType) + '</div>' +
+    '<div class="match-when">' + esc(matchWhen(r)) + '</div>' +
     '<div class="match-meta">' +
       esc(r.location) +
       (r.opponent ? ' · vs ' + esc(r.opponent) : '') +
@@ -1148,7 +1169,7 @@ function claimMatch(id) {
 
   showModal(
     'Confirm you can play',
-    'You\'re committing to ' + team.name + ' on ' + fmtDate(r.date) + ' (' + r.matchType + ')' +
+    'You\'re committing to ' + team.name + ' on ' + matchWhen(r) +
     ' at ' + r.location + '. ' + r.postedBy + ' will be notified right away.',
     "Yes, I'll sub",
     async () => {
@@ -1290,6 +1311,7 @@ function goToNotify() {
   const teamId = document.getElementById('pTeam').value;
   const date   = document.getElementById('pDate').value;
   const type   = document.getElementById('pType').value;
+  const time   = document.getElementById('pTime').value;
   const loc    = document.getElementById('pLocation').value.trim();
 
   if (!date) return showToast('Pick a match date');
@@ -1304,14 +1326,14 @@ function goToNotify() {
   draft = {
     teamId: teamId,
     level: team.level,          // always the team's level, never a separate choice
-    date: date, matchType: type, location: loc,
+    date: date, time: time, matchType: type, location: loc,
     opponent: document.getElementById('pOpponent').value.trim(),
     notes:    document.getElementById('pNotes').value.trim()
   };
   pickedSubs = [];
 
   document.getElementById('notifySummary').textContent =
-    team.name + ' · ' + fmtDate(date) + ' · ' + type + ' · ' + draft.level;
+    team.name + ' · ' + matchWhen(draft) + ' · ' + draft.level;
 
   renderSubPicker();
   showScreen('notifyScreen');
@@ -1491,7 +1513,7 @@ function confirmNotify() {
         REQUESTS.unshift({
           id: 'r' + Date.now(),
           teamId: draft.teamId, level: draft.level,
-          date: draft.date, matchType: draft.matchType,
+          date: draft.date, time: draft.time, matchType: draft.matchType,
           location: draft.location, opponent: draft.opponent,
           notes: draft.notes,
           postedBy: postedBy, postedAt: new Date().toISOString(),
@@ -1505,7 +1527,7 @@ function confirmNotify() {
       const resp = await postAPI({
         action: 'postRequest',
         teamId: draft.teamId, level: draft.level,
-        date: draft.date, matchType: draft.matchType,
+        date: draft.date, time: draft.time, matchType: draft.matchType,
         location: draft.location, opponent: draft.opponent,
         notes: draft.notes,
         postedBy: postedBy, notified: pickedSubs.slice()
@@ -1520,7 +1542,7 @@ function confirmNotify() {
 
 function finishPost(msg) {
   draft = null; pickedSubs = []; notifyMode = 'new';
-  ['pDate', 'pOpponent', 'pNotes'].forEach(id => {
+  ['pDate', 'pTime', 'pOpponent', 'pNotes'].forEach(id => {
     document.getElementById(id).value = '';
   });
   navigate('requestsScreen', document.getElementById('tabRequests'));
@@ -1605,7 +1627,7 @@ function renderRequests() {
       '<div class="match-team">' + esc(team.name) +
         '<span class="badge badge-level">' + esc(r.level) + '</span>' + statusBadge + urgentBadge +
       '</div>' +
-      '<div class="match-when">' + fmtDate(r.date) + ' · ' + esc(r.matchType) + '</div>' +
+      '<div class="match-when">' + esc(matchWhen(r)) + '</div>' +
       '<div class="match-meta">' + esc(r.location) +
         (r.opponent ? ' · vs ' + esc(r.opponent) : '') +
         '</div>' +
@@ -1621,7 +1643,7 @@ function widenNet(id) {
 
   notifyMode = 'more';
   draft = {
-    teamId: r.teamId, level: r.level, date: r.date, matchType: r.matchType,
+    teamId: r.teamId, level: r.level, date: r.date, time: r.time, matchType: r.matchType,
     location: r.location, opponent: r.opponent, notes: r.notes,
     existingId: r.id, alreadyNotified: r.notified.slice()
   };

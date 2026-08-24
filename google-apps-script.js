@@ -8,7 +8,7 @@
  * then redeploy with Deploy → Manage deployments → edit → New version.
  */
 
-var VERSION = 7;
+var VERSION = 8;
 
 /* Sheet tabs are created automatically on first run. */
 var TABS = {
@@ -17,7 +17,7 @@ var TABS = {
   Subs:     ['SubID', 'Name', 'Email', 'Phone', 'Level', 'Verified',
              'Token', 'Active', 'Added By', 'Signed Up At', 'Sub Count', 'Last Sub',
              'Season', 'Team Subs'],
-  Requests: ['ID', 'TeamID', 'Level', 'Date', 'Match Type', 'Location', 'Opponent',
+  Requests: ['ID', 'TeamID', 'Level', 'Date', 'Time', 'Match Type', 'Location', 'Opponent',
              'Notes', 'Posted By', 'Posted At', 'Notified', 'Status', 'Claimed By',
              'Claimed At', 'Nudged'],
   History:  ['Request ID', 'Team', 'Match Date', 'Sub Name', 'Sub Email', 'Claimed At', 'Posted By']
@@ -314,6 +314,14 @@ function toTimeString(v) {
   return String(v).trim();
 }
 
+/** "Saturday, September 12 at 6:00 PM - Doubles", dropping any part not set. */
+function matchWhen_(req) {
+  var out = prettyDate(req.date);
+  if (req.time) out += ' at ' + prettyTime(req.time);
+  if (req.matchType) out += ' - ' + req.matchType;
+  return out;
+}
+
 function prettyDate(dateStr) {
   if (!dateStr) return '';
   var parts = String(dateStr).split('-');
@@ -401,6 +409,7 @@ function loadRequests() {
       teamId: String(r.TeamID).trim(),
       level: normLevel(r.Level),
       date: toDateString(r.Date),
+      time: toTimeString(r.Time),
       matchType: String(r['Match Type'] || '').trim(),
       location: String(r.Location || '').trim(),
       opponent: String(r.Opponent || '').trim(),
@@ -690,7 +699,7 @@ function actionPostRequest(data) {
   var id = newId('r');
   appendByHeader(getSheet('Requests'), {
     'ID': id, 'TeamID': team.id, 'Level': team.level,
-    'Date': data.date, 'Match Type': data.matchType || '',
+    'Date': data.date, 'Time': data.time || '', 'Match Type': data.matchType || '',
     'Location': data.location || '', 'Opponent': data.opponent || '',
     'Notes': data.notes || '', 'Posted By': data.postedBy || '',
     'Posted At': new Date(), 'Notified': notified.join(', '),
@@ -877,7 +886,7 @@ function handleClaimFromEmail(requestId, subId, token) {
         var team = teamById(reqs[i].teamId);
         return htmlPage("You're in",
           "You're subbing for " + team.name + ' on ' + prettyDate(reqs[i].date) +
-          ' - ' + reqs[i].matchType + ', ' + reqs[i].location +
+          ' - ' + matchWhen_(reqs[i]) + ', ' + reqs[i].location +
           '. ' + reqs[i].postedBy + ' has been notified.');
       }
     }
@@ -1064,7 +1073,7 @@ function notifySubsOfRequest(requestId, subIds) {
                    '&sub=' + sub.id + '&token=' + subToken(sub.id);
 
     var details = [
-      ['When', prettyDate(req.date)],
+      ['When', prettyDate(req.date) + (req.time ? ' at ' + prettyTime(req.time) : '')],
       ['Playing', req.matchType],
       ['Where', req.location]
     ];
@@ -1074,7 +1083,7 @@ function notifySubsOfRequest(requestId, subIds) {
     var body =
       'Hi ' + sub.name + ',\n\n' +
       team.name + ' needs a sub.\n\n' +
-      'When:    ' + prettyDate(req.date) + '\n' +
+      'When:    ' + prettyDate(req.date) + (req.time ? ' at ' + prettyTime(req.time) : '') + '\n' +
       'Playing: ' + req.matchType + '\n' +
       'Where: ' + req.location + '\n' +
       (req.opponent ? 'Vs:    ' + req.opponent + '\n' : '') +
@@ -1122,7 +1131,7 @@ function notifyCaptainOfClaim(requestId, sub) {
   var body =
     'Good news — ' + sub.name + ' is subbing.\n\n' +
     'Match: ' + team.name + '\n' +
-    'When:    ' + prettyDate(req.date) + '\n' +
+    'When:    ' + prettyDate(req.date) + (req.time ? ' at ' + prettyTime(req.time) : '') + '\n' +
     'Playing: ' + req.matchType + '\n' +
     'Where: ' + req.location + '\n' +
     '\nReach ' + sub.name + ':\n' +
@@ -1153,7 +1162,7 @@ function notifyCaptainOfWithdrawal(requestId, sub) {
 
   var body =
     (sub ? sub.name : 'Your sub') + ' can no longer play ' + team.name +
-    ' on ' + prettyDate(req.date) + ' (' + req.matchType + ').\n\n' +
+    ' on ' + matchWhen_(req) + '.\n\n' +
     'The spot is open again. Open the app to notify more subs:\n' +
     (getConfig('AppUrl') || webAppUrl());
 
@@ -1230,7 +1239,8 @@ function sendNoResponseNudges() {
     var body =
       'Nobody has claimed this match yet:\n\n' +
       team.name + '\n' +
-      prettyDate(matchDate) + ' - ' + String(r['Match Type'] || '') + '\n' +
+      prettyDate(matchDate) + (toTimeString(r.Time) ? ' at ' + prettyTime(toTimeString(r.Time)) : '') +
+      ' - ' + String(r['Match Type'] || '') + '\n' +
       String(r.Location || '') + '\n\n' +
       'You notified ' + notifiedCount + ' ' + (notifiedCount === 1 ? 'sub' : 'subs') +
       ' and none have accepted.\n\n' +
