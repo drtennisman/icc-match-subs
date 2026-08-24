@@ -1702,12 +1702,17 @@ function joinLink() {
 
 function inviteMessage() {
   const from = me.name ? '\n\n— ' + me.name : '';
-  return "Hey! We're using an app to line up tennis subs this season.\n\n" +
+  // "Nothing to install" goes first: a link from a half-known number is
+  // exactly what people are wary of tapping.
+  return "Hey! We're using an app to line up tennis subs this season — " +
+    "it's just a web link, nothing to install.\n\n" +
     "If you'd be open to subbing, you can add yourself in about 30 seconds — " +
     "it just asks your name, email, and your soft court level.\n\n" +
     "You'll only get an email when a team at your level actually needs someone, " +
     "and you're never obligated to say yes. You can take yourself off the list anytime.\n\n" +
-    joinLink() + from;
+    joinLink() + "\n\n" +
+    "(Want it on your home screen? Open the link in Safari, tap the Share " +
+    'button, then "Add to Home Screen.")' + from;
 }
 
 function buildInvite() {
