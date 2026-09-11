@@ -8,7 +8,7 @@
  * then redeploy with Deploy → Manage deployments → edit → New version.
  */
 
-var VERSION = 8;
+var VERSION = 9;
 
 /* Sheet tabs are created automatically on first run. */
 var TABS = {
@@ -779,7 +779,7 @@ function actionClaim(data) {
   var left = cap - (used + 1);
   return {
     status: 'ok',
-    message: 'Confirmed — the captain has been notified.',
+    message: 'Confirmed — the captain will text you the details.',
     subsLeftForTeam: left
   };
 }
@@ -887,10 +887,10 @@ function handleClaimFromEmail(requestId, subId, token) {
         return htmlPage("You're in",
           "You're subbing for " + team.name + ' on ' + prettyDate(reqs[i].date) +
           ' - ' + matchWhen_(reqs[i]) + ', ' + reqs[i].location +
-          '. ' + reqs[i].postedBy + ' has been notified.');
+          '. ' + reqs[i].postedBy + ' has been notified and will text you the details.');
       }
     }
-    return htmlPage("You're in", 'The captain has been notified.');
+    return htmlPage("You're in", 'The captain has been notified and will text you the details.');
   } finally {
     lock.releaseLock();
   }

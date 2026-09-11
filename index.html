@@ -555,7 +555,7 @@
 /* ═══════════════════════════════════════════════════════
    CONFIG
    ═══════════════════════════════════════════════════════ */
-const APP_VERSION = 8; // must match VERSION in google-apps-script.js
+const APP_VERSION = 9; // must match VERSION in google-apps-script.js
 
 /*
  * Paste the deployed Apps Script Web App URL here once it exists.
@@ -1124,8 +1124,14 @@ function matchCardHTML(r, mySubId) {
       '<button class="btn btn-ghost btn-small" onclick="passMatch(\'' + r.id + '\')">Can\'t make it</button>' +
       '</div>';
   } else if (iClaimed) {
-    actions = '<div class="match-actions">' +
-      '<button class="btn btn-ghost btn-small" onclick="withdrawMatch(\'' + r.id + '\')">I can no longer play</button>' +
+    // A toast vanishes; this stays put for whenever they check back and
+    // wonder whether anything is supposed to happen next.
+    actions = '<div class="match-notes" style="background:#d4edda;color:#155724;">' +
+        '<strong>' + esc(r.postedBy) + ' will text you</strong> with the details. ' +
+        'Nothing else to do — just turn up.' +
+      '</div>' +
+      '<div class="match-actions">' +
+        '<button class="btn btn-ghost btn-small" onclick="withdrawMatch(\'' + r.id + '\')">I can no longer play</button>' +
       '</div>';
   }
 
@@ -1170,7 +1176,7 @@ function claimMatch(id) {
   showModal(
     'Confirm you can play',
     'You\'re committing to ' + team.name + ' on ' + matchWhen(r) +
-    ' at ' + r.location + '. ' + r.postedBy + ' will be notified right away.',
+    ' at ' + r.location + '. ' + r.postedBy + ' will be notified right away and will text you the details.',
     "Yes, I'll sub",
     async () => {
       if (DEMO_MODE) {
@@ -1182,7 +1188,7 @@ function claimMatch(id) {
         if (s) { bumpTeamSub(s, r.teamId, 1); s.lastSub = r.date; }
         renderMatches();
         updateChrome();
-        showToast(r.postedBy + ' has been notified');
+        showToast(r.postedBy + ' will text you');
         return;
       }
 
@@ -1192,7 +1198,7 @@ function claimMatch(id) {
       renderMatches();
       updateChrome();
       showToast(resp.status === 'ok'
-        ? r.postedBy + ' has been notified'
+        ? r.postedBy + ' will text you'
         : (resp.message || 'Could not claim it'));
     }
   );
