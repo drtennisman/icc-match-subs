@@ -8,7 +8,7 @@
  * then redeploy with Deploy → Manage deployments → edit → New version.
  */
 
-var VERSION = 9;
+var VERSION = 10;
 
 /* Sheet tabs are created automatically on first run. */
 var TABS = {
@@ -172,6 +172,30 @@ function getConfig(key) {
 
 function webAppUrl() {
   return ScriptApp.getService().getUrl();
+}
+
+/*
+ * Links in emails point at the app on Vercel, never at script.google.com.
+ *
+ * A browser signed into more than one Google account rewrites a
+ * script.google.com link to /macros/u/1/s/..., which fails with Google
+ * Drive's "unable to open the file" page. The app instead hands the request
+ * to this script with fetch, which carries no Google sign-in at all, so the
+ * rewrite never happens. It also means a link only acts when someone really
+ * opens it: a mail scanner that pre-fetches URLs gets a page, not a claim.
+ */
+var DEFAULT_APP_URL = 'https://icc-match-subs.vercel.app';
+
+function appUrl_() {
+  return (getConfig('AppUrl') || DEFAULT_APP_URL).replace(/\/+$/, '');
+}
+
+function appLink_(params) {
+  var parts = [];
+  for (var k in params) {
+    parts.push(encodeURIComponent(k) + '=' + encodeURIComponent(params[k]));
+  }
+  return appUrl_() + '/?' + parts.join('&');
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -576,6 +600,9 @@ function doPost(e) {
       case 'claim':         return jsonResponse(actionClaim(data));
       case 'withdraw':      return jsonResponse(actionWithdraw(data));
       case 'cancelRequest': return jsonResponse(actionCancelRequest(data));
+      case 'emailClaim':    return jsonResponse(actionEmailClaim(data));
+      case 'emailVerify':   return jsonResponse(actionEmailVerify(data));
+      case 'emailOptOut':   return jsonResponse(actionEmailOptOut(data));
       default:
         return jsonResponse({ status: 'error', message: 'Unknown action: ' + data.action });
     }
@@ -841,7 +868,106 @@ function logHistory(requestId, sub) {
 
 /* ═══════════════════════════════════════════════════════
    EMAIL LINK HANDLERS
+
+   The action* versions are what current emails use: the link opens the app,
+   and the app posts here. The handle* versions below them answer links in
+   emails sent before that change, so nobody's old email goes dead.
    ═══════════════════════════════════════════════════════ */
+
+/** The sub's row if the token matches, otherwise null. */
+function subRowForToken_(subId, token) {
+  var sheet = getSheet('Subs');
+  var row = findRowById(sheet, subId);
+  if (row === -1) return null;
+  var stored = String(sheet.getRange(row, colIndex(sheet, 'Token')).getValue()).trim();
+  if (!token || String(token).trim() !== stored) return null;
+  return { sheet: sheet, row: row };
+}
+
+function subSummary_(hit) {
+  var sh = hit.sheet, r = hit.row;
+  return {
+    id: String(sh.getRange(r, colIndex(sh, 'SubID')).getValue()).trim(),
+    name: String(sh.getRange(r, colIndex(sh, 'Name')).getValue()).trim(),
+    level: normLevel(sh.getRange(r, colIndex(sh, 'Level')).getValue())
+  };
+}
+
+function badLink_() {
+  return {
+    status: 'error',
+    title: 'Link not recognized',
+    message: "That link isn't valid any more. Open the app to check your matches or sign up again."
+  };
+}
+
+function actionEmailVerify(data) {
+  var hit = subRowForToken_(data.subId, data.token);
+  if (!hit) return badLink_();
+
+  hit.sheet.getRange(hit.row, colIndex(hit.sheet, 'Verified')).setValue(true);
+  hit.sheet.getRange(hit.row, colIndex(hit.sheet, 'Active')).setValue(true);
+  var sub = subSummary_(hit);
+
+  return {
+    status: 'ok',
+    title: "You're on the sub list",
+    message: 'Thanks ' + sub.name + " — you're all set. You'll get an email whenever a " +
+             'team at your level or above needs someone.',
+    sub: sub
+  };
+}
+
+function actionEmailClaim(data) {
+  var hit = subRowForToken_(data.subId, data.token);
+  if (!hit) return badLink_();
+  var sub = subSummary_(hit);
+
+  var req = null;
+  var reqs = loadRequests();
+  for (var i = 0; i < reqs.length; i++) if (reqs[i].id === data.requestId) req = reqs[i];
+  if (!req) {
+    return { status: 'error', title: 'Match not found',
+             message: 'That match is no longer listed. The captain may have cancelled it.', sub: sub };
+  }
+
+  var team = teamById(req.teamId);
+  var described = team.name + ' on ' + matchWhen_(req) + ', ' + req.location;
+
+  /* Tapping the button twice shouldn't read as "someone beat you to it". */
+  if (req.status === 'filled' && req.claimedBy === sub.id) {
+    return { status: 'ok', title: "You're already in",
+             message: "You're subbing for " + described + '. ' + req.postedBy +
+                      ' will text you the details.', sub: sub };
+  }
+
+  var result = actionClaim({ id: req.id, subId: sub.id });
+  if (result.status !== 'ok') {
+    return { status: 'error', title: "Couldn't take this match", message: result.message, sub: sub };
+  }
+
+  return {
+    status: 'ok',
+    title: "You're in",
+    message: "You're subbing for " + described + '. ' + req.postedBy +
+             ' has been notified and will text you the details.',
+    sub: sub
+  };
+}
+
+function actionEmailOptOut(data) {
+  var hit = subRowForToken_(data.subId, data.token);
+  if (!hit) return badLink_();
+
+  hit.sheet.getRange(hit.row, colIndex(hit.sheet, 'Active')).setValue(false);
+  var sub = subSummary_(hit);
+  return {
+    status: 'ok',
+    title: "You're off the list",
+    message: 'No problem, ' + sub.name + " — you won't get any more sub requests. " +
+             'You can sign up again in the app anytime.'
+  };
+}
 
 function handleVerify(subId, token) {
   var sheet = getSheet('Subs');
@@ -885,8 +1011,8 @@ function handleClaimFromEmail(requestId, subId, token) {
       if (reqs[i].id === requestId) {
         var team = teamById(reqs[i].teamId);
         return htmlPage("You're in",
-          "You're subbing for " + team.name + ' on ' + prettyDate(reqs[i].date) +
-          ' - ' + matchWhen_(reqs[i]) + ', ' + reqs[i].location +
+          "You're subbing for " + team.name + ' on ' + matchWhen_(reqs[i]) +
+          ', ' + reqs[i].location +
           '. ' + reqs[i].postedBy + ' has been notified and will text you the details.');
       }
     }
@@ -968,7 +1094,7 @@ function emailHtml(opts) {
 }
 
 function optOutUrl(subId, token) {
-  return webAppUrl() + '?action=optOut&sub=' + subId + '&token=' + (token || subToken(subId));
+  return appLink_({ optout: subId, t: token || subToken(subId) });
 }
 
 /** Plain-text footer. The opt-out link is deliberately kept well clear of any
@@ -991,7 +1117,7 @@ function subToken(subId) {
 }
 
 function sendVerifyEmail(subId, name, email, token) {
-  var url = webAppUrl() + '?action=verify&sub=' + subId + '&token=' + token;
+  var url = appLink_({ verify: subId, t: token });
   var body =
     'Hi ' + name + ',\n\n' +
     'Confirm your spot on the tennis sub list by opening this link:\n\n' + url + '\n\n' +
@@ -1069,8 +1195,7 @@ function notifySubsOfRequest(requestId, subIds) {
     /* Don't invite someone who would be turned away when they tap the link. */
     if (((sub.teamSubs || {})[req.teamId] || 0) >= cap) continue;
 
-    var claimUrl = url + '?action=claimFromEmail&r=' + req.id +
-                   '&sub=' + sub.id + '&token=' + subToken(sub.id);
+    var claimUrl = appLink_({ claim: req.id, sub: sub.id, t: subToken(sub.id) });
 
     var details = [
       ['When', prettyDate(req.date) + (req.time ? ' at ' + prettyTime(req.time) : '')],

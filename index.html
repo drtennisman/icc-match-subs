@@ -357,6 +357,16 @@
     </div>
   </div>
 
+  <!-- ══════════ EMAIL LINK RESULT ══════════ -->
+  <div class="screen" id="linkScreen">
+    <div class="card" style="text-align:center;">
+      <span id="linkIcon" style="font-size:44px;display:block;margin-bottom:10px;">⏳</span>
+      <h2 id="linkTitle">One moment…</h2>
+      <p class="card-sub" id="linkMessage" style="margin-bottom:20px;">Checking your link.</p>
+      <button class="btn btn-primary" id="linkBtn" style="display:none;" onclick="leaveLinkScreen()">Open Match Subs</button>
+    </div>
+  </div>
+
   <!-- ══════════ MATCHES (sub view) ══════════ -->
   <div class="screen" id="matchesScreen">
     <div id="matchesList"></div>
@@ -555,7 +565,7 @@
 /* ═══════════════════════════════════════════════════════
    CONFIG
    ═══════════════════════════════════════════════════════ */
-const APP_VERSION = 9; // must match VERSION in google-apps-script.js
+const APP_VERSION = 10; // must match VERSION in google-apps-script.js
 
 /*
  * Paste the deployed Apps Script Web App URL here once it exists.
@@ -1942,10 +1952,88 @@ function resetApp() {
 /* ═══════════════════════════════════════════════════════
    BOOT
    ═══════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════
+   EMAIL LINKS
+
+   Buttons in emails open the app (?claim= / ?verify= / ?optout=) instead of
+   script.google.com. A browser signed into several Google accounts breaks
+   script.google.com links; a fetch from here carries no Google sign-in, so
+   that can't happen.
+   ═══════════════════════════════════════════════════════ */
+function readEmailLink() {
+  const p = new URLSearchParams(location.search);
+  const token = p.get('t');
+  if (!token) return null;
+  if (p.get('claim') && p.get('sub')) {
+    return { action: 'emailClaim', requestId: p.get('claim'), subId: p.get('sub'), token: token };
+  }
+  if (p.get('verify')) return { action: 'emailVerify', subId: p.get('verify'), token: token };
+  if (p.get('optout')) return { action: 'emailOptOut', subId: p.get('optout'), token: token };
+  return null;
+}
+
+function showLinkResult(icon, title, message) {
+  document.getElementById('linkIcon').textContent = icon;
+  document.getElementById('linkTitle').textContent = title;
+  document.getElementById('linkMessage').textContent = message;
+  document.getElementById('linkBtn').style.display = '';
+}
+
+async function handleEmailLink(link) {
+  // Clear the link from the address bar first, so a refresh can't submit it again.
+  history.replaceState(null, '', location.pathname);
+  document.getElementById('bottomNav').style.display = 'none';
+  showScreen('linkScreen');
+
+  if (DEMO_MODE) {
+    showLinkResult('🧪', 'Demo mode', 'Email links only work once the app is connected to the Sheet.');
+    return;
+  }
+
+  const resp = await postAPI(link);
+
+  if (resp.status === 'ok' && resp.blind) {
+    // The response couldn't be read, so the result is unknown — don't claim success.
+    showLinkResult('✅', 'Sent', 'Open the app to check it went through.');
+    return;
+  }
+
+  if (resp.status !== 'ok') {
+    showLinkResult('⚠️', resp.title || 'Something went wrong', resp.message || 'Please try again in a moment.');
+  } else {
+    const icon = link.action === 'emailOptOut' ? '👋' : '🎾';
+    showLinkResult(icon, resp.title || 'Done', resp.message || '');
+  }
+
+  // A valid token proves who this is, so this phone can remember them —
+  // but never overwrite a captain's own name or role on a captain's phone.
+  if (resp.sub && resp.sub.id && link.action !== 'emailOptOut') {
+    me.subId = resp.sub.id;
+    me.level = resp.sub.level || me.level;
+    me.verified = true;
+    if (me.role !== 'captain') {
+      me.role = 'sub';
+      me.name = resp.sub.name || me.name;
+    }
+    saveMe();
+    dataLoaded = false;
+  }
+}
+
+function leaveLinkScreen() {
+  location.href = location.pathname;
+}
+
 async function boot() {
   document.getElementById('demoBanner').style.display = DEMO_MODE ? '' : 'none';
   if (DEMO_MODE) {
     document.getElementById('verifyBtn').textContent = 'Simulate clicking the link (demo)';
+  }
+
+  const emailLink = readEmailLink();
+  if (emailLink) {
+    await handleEmailLink(emailLink);
+    return;
   }
 
   /*
