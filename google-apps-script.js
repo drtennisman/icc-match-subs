@@ -8,7 +8,7 @@
  * then redeploy with Deploy → Manage deployments → edit → New version.
  */
 
-var VERSION = 10;
+var VERSION = 11;
 
 /* Sheet tabs are created automatically on first run. */
 var TABS = {
@@ -1116,6 +1116,42 @@ function subToken(subId) {
   return String(sheet.getRange(row, colIndex(sheet, 'Token')).getValue()).trim();
 }
 
+/*
+ * Who an email appears to come from, and where a reply goes.
+ *
+ * Apps Script can only send from the account that deployed it, and putting a
+ * captain's Gmail address in From would be treated as spoofing and land in
+ * spam. So the captain goes in the display name and in Reply-To instead: the
+ * inbox shows "Jane Miller via ICC Match Subs", and Reply writes to Jane.
+ */
+var APP_SENDER_NAME = 'ICC Match Subs';
+
+function senderName_(person) {
+  var clean = String(person || '').replace(/["<>\r\n]/g, '').trim();
+  return clean ? clean + ' via ' + APP_SENDER_NAME : APP_SENDER_NAME;
+}
+
+function isEmail_(v) {
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(v || '').trim());
+}
+
+/** MailApp.sendEmail with a display name, plus Reply-To when there's a valid address. */
+function sendMail_(msg, fromPerson, replyTo) {
+  msg.name = senderName_(fromPerson);
+  if (isEmail_(replyTo)) msg.replyTo = String(replyTo).trim();
+  if (!msg.cc) delete msg.cc;
+  MailApp.sendEmail(msg);
+}
+
+/** A captain's address from the Teams tab, by the name they picked in the app. */
+function captainEmailByName_(name) {
+  var teams = loadTeams();
+  for (var i = 0; i < teams.length; i++) {
+    if (teams[i].captain === name && teams[i].captainEmail) return teams[i].captainEmail;
+  }
+  return '';
+}
+
 function sendVerifyEmail(subId, name, email, token) {
   var url = appLink_({ verify: subId, t: token });
   var body =
@@ -1134,10 +1170,10 @@ function sendVerifyEmail(subId, name, email, token) {
   });
 
   try {
-    MailApp.sendEmail({
+    sendMail_({
       to: email, subject: 'Confirm your spot on the sub list',
       body: body, htmlBody: html
-    });
+    }, '', '');
   } catch (err) {
     Logger.log('Verify email failed for ' + email + ': ' + err);
   }
@@ -1168,10 +1204,11 @@ function sendAddedByCaptainEmail(subId, name, email, token, addedBy, level) {
   });
 
   try {
-    MailApp.sendEmail({
+    var adder = addedBy === 'A captain' ? '' : addedBy;
+    sendMail_({
       to: email, subject: "You've been added to the tennis sub list",
       body: body, htmlBody: html
-    });
+    }, adder, captainEmailByName_(adder));
   } catch (err) {
     Logger.log('Added-by-captain email failed for ' + email + ': ' + err);
   }
@@ -1184,8 +1221,11 @@ function notifySubsOfRequest(requestId, subIds) {
   if (!req) return 0;
 
   var team = teamById(req.teamId);
-  var url = webAppUrl();
   var sent = 0;
+
+  /* Whoever posted it, falling back to the team's listed captain. */
+  var posterName  = req.postedBy || team.captain;
+  var posterEmail = captainEmailByName_(posterName) || team.captainEmail;
 
   var cap = maxSubsPerTeam();
 
@@ -1229,12 +1269,12 @@ function notifySubsOfRequest(requestId, subIds) {
     });
 
     try {
-      MailApp.sendEmail({
+      sendMail_({
         to: sub.email,
         subject: 'Sub needed — ' + team.name + ', ' + prettyDate(req.date),
         body: body,
         htmlBody: html
-      });
+      }, posterName, posterEmail);
       sent++;
     } catch (err) {
       Logger.log('Request email failed for ' + sub.email + ': ' + err);
@@ -1266,11 +1306,11 @@ function notifyCaptainOfClaim(requestId, sub) {
 
   var cc = getConfig('ManagerEmail');
   try {
-    MailApp.sendEmail({
+    sendMail_({
       to: to, cc: cc || '',
       subject: sub.name + ' is subbing — ' + team.name + ', ' + prettyDate(req.date),
       body: body
-    });
+    }, '', sub.email);
   } catch (err) {
     Logger.log('Captain claim email failed: ' + err);
   }
@@ -1292,11 +1332,11 @@ function notifyCaptainOfWithdrawal(requestId, sub) {
     (getConfig('AppUrl') || webAppUrl());
 
   try {
-    MailApp.sendEmail({
+    sendMail_({
       to: team.captainEmail,
       subject: 'Sub dropped out — ' + team.name + ', ' + prettyDate(req.date),
       body: body
-    });
+    }, '', sub ? sub.email : '');
   } catch (err) {
     Logger.log('Withdrawal email failed: ' + err);
   }
@@ -1309,16 +1349,19 @@ function notifyCancellation(requestId) {
   if (!req) return;
 
   var team = teamById(req.teamId);
+  var posterName  = req.postedBy || team.captain;
+  var posterEmail = captainEmailByName_(posterName) || team.captainEmail;
+
   for (var j = 0; j < req.notified.length; j++) {
     var sub = subById(req.notified[j]);
     if (!sub || !sub.email) continue;
     try {
-      MailApp.sendEmail({
+      sendMail_({
         to: sub.email,
         subject: 'No longer needed — ' + team.name + ', ' + prettyDate(req.date),
         body: 'Hi ' + sub.name + ',\n\n' + team.name + ' no longer needs a sub for ' +
               prettyDate(req.date) + '. Thanks anyway!' + emailFooter(sub)
-      });
+      }, posterName, posterEmail);
     } catch (err) {
       Logger.log('Cancellation email failed for ' + sub.email + ': ' + err);
     }
@@ -1372,11 +1415,11 @@ function sendNoResponseNudges() {
       'Open the app and tap "Notify more subs" to widen the net:\n' + appUrl;
 
     try {
-      MailApp.sendEmail({
+      sendMail_({
         to: team.captainEmail,
         subject: 'Still no sub — ' + team.name + ', ' + prettyDate(matchDate),
         body: body
-      });
+      }, '', '');
       sheet.getRange(r._row, nudgedCol).setValue(true);
     } catch (err) {
       Logger.log('Nudge email failed: ' + err);
