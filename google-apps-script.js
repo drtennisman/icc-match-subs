@@ -8,7 +8,7 @@
  * then redeploy with Deploy → Manage deployments → edit → New version.
  */
 
-var VERSION = 11;
+var VERSION = 12;
 
 /* Sheet tabs are created automatically on first run. */
 var TABS = {
@@ -16,7 +16,7 @@ var TABS = {
   Teams:    ['TeamID', 'Team Name', 'Level', 'Captain', 'Captain Email', 'Active'],
   Subs:     ['SubID', 'Name', 'Email', 'Phone', 'Level', 'Verified',
              'Token', 'Active', 'Added By', 'Signed Up At', 'Sub Count', 'Last Sub',
-             'Season', 'Team Subs'],
+             'Season', 'Team Subs', 'Pending Name', 'Pending Phone', 'Pending Level'],
   Requests: ['ID', 'TeamID', 'Level', 'Date', 'Time', 'Match Type', 'Location', 'Opponent',
              'Notes', 'Posted By', 'Posted At', 'Notified', 'Status', 'Claimed By',
              'Claimed At', 'Nudged'],
@@ -139,7 +139,7 @@ function jsonResponse(obj) {
 
 function htmlPage(title, message, tone) {
   var color = tone === 'error' ? '#dc3545' : '#28a745';
-  var appUrl = getConfig('AppUrl');
+  var appUrl = appUrl_();
   var link = appUrl
     ? '<a href="' + appUrl + '" style="display:inline-block;margin-top:22px;padding:14px 28px;' +
       'background:#021f3d;color:#fff;text-decoration:none;border-radius:12px;font-weight:700;">Open Match Subs</a>'
@@ -593,7 +593,6 @@ function doPost(e) {
   try {
     switch (data.action) {
       case 'signup':        return jsonResponse(actionSignup(data));
-      case 'updateProfile': return jsonResponse(actionUpdateProfile(data));
       case 'addSub':        return jsonResponse(actionAddSub(data));
       case 'postRequest':   return jsonResponse(actionPostRequest(data));
       case 'notifyMore':    return jsonResponse(actionNotifyMore(data));
@@ -603,6 +602,7 @@ function doPost(e) {
       case 'emailClaim':    return jsonResponse(actionEmailClaim(data));
       case 'emailVerify':   return jsonResponse(actionEmailVerify(data));
       case 'emailOptOut':   return jsonResponse(actionEmailOptOut(data));
+      case 'emailRelease':  return jsonResponse(actionEmailRelease(data));
       default:
         return jsonResponse({ status: 'error', message: 'Unknown action: ' + data.action });
     }
@@ -630,23 +630,33 @@ function actionSignup(data) {
   var sheet = getSheet('Subs');
   var rows = sheetToObjects(sheet);
 
-  /* Already on the list? Update in place and re-send the confirmation. */
+  /*
+   * Already on the list? Nothing changes until whoever owns that inbox
+   * confirms it. Updating in place would let anyone who knows a member's
+   * email address replace their phone number or level just by signing up.
+   */
   for (var i = 0; i < rows.length; i++) {
     if (normEmail(rows[i].Email) === email) {
-      var token = String(rows[i].Token).trim() || makeToken();
-      sheet.getRange(rows[i]._row, colIndex(sheet, 'Name')).setValue(name);
-      sheet.getRange(rows[i]._row, colIndex(sheet, 'Phone')).setValue(data.phone || '');
-      sheet.getRange(rows[i]._row, colIndex(sheet, 'Level')).setValue(normLevel(data.level));
-      sheet.getRange(rows[i]._row, colIndex(sheet, 'Token')).setValue(token);
-      sheet.getRange(rows[i]._row, colIndex(sheet, 'Active')).setValue(true);
+      var existingRow = rows[i]._row;
+      var existingId = String(rows[i].SubID).trim();
+      var token = String(rows[i].Token).trim();
+      if (!token) {
+        token = makeToken();
+        sheet.getRange(existingRow, colIndex(sheet, 'Token')).setValue(token);
+      }
+      var newPhone = String(data.phone || '').trim();
+      var newLevel = normLevel(data.level);
+      sheet.getRange(existingRow, colIndex(sheet, 'Pending Name')).setValue(name);
+      sheet.getRange(existingRow, colIndex(sheet, 'Pending Phone')).setValue(newPhone);
+      sheet.getRange(existingRow, colIndex(sheet, 'Pending Level')).setValue(newLevel);
 
-      var alreadyVerified = isTrue(rows[i].Verified);
-      if (!alreadyVerified) sendVerifyEmail(String(rows[i].SubID).trim(), name, email, token);
+      sendVerifyEmail(existingId, name, email, token, { level: newLevel, phone: newPhone });
       return {
         status: 'ok',
-        subId: String(rows[i].SubID).trim(),
-        verified: alreadyVerified,
-        message: alreadyVerified ? 'Profile updated.' : 'Confirmation email sent.'
+        subId: existingId,
+        verified: isTrue(rows[i].Verified),
+        pending: true,
+        message: 'Check your email to confirm. Nothing changes until you tap the link.'
       };
     }
   }
@@ -662,18 +672,6 @@ function actionSignup(data) {
 
   sendVerifyEmail(id, name, email, tok);
   return { status: 'ok', subId: id, verified: false, message: 'Confirmation email sent.' };
-}
-
-function actionUpdateProfile(data) {
-  var sheet = getSheet('Subs');
-  var row = findRowById(sheet, data.subId);
-  if (row === -1) return { status: 'error', message: 'We could not find you on the sub list.' };
-
-  if (data.name)  sheet.getRange(row, colIndex(sheet, 'Name')).setValue(String(data.name).trim());
-  if (data.phone !== undefined) sheet.getRange(row, colIndex(sheet, 'Phone')).setValue(data.phone);
-  if (data.level)  sheet.getRange(row, colIndex(sheet, 'Level')).setValue(normLevel(data.level));
-
-  return { status: 'ok', message: 'Profile updated.' };
 }
 
 /** Captain adds someone by hand. Active right away — the captain vouched for them. */
@@ -802,6 +800,7 @@ function actionClaim(data) {
   bumpTeamSub(sub.id, teamId, 1);
   logHistory(data.id, sub);
   notifyCaptainOfClaim(data.id, sub);
+  sendClaimReceipt_(data.id, sub);
 
   var left = cap - (used + 1);
   return {
@@ -811,12 +810,47 @@ function actionClaim(data) {
   };
 }
 
+/**
+ * "I can no longer play" is confirmed by email.
+ *
+ * The app knows a sub only by an ID that anyone can see, so withdrawing
+ * straight from it would let one person quietly pull another out of a match.
+ * Instead the sub holding the spot is emailed a link, and the spot reopens
+ * only when they tap it (actionEmailRelease). A spoofed request just sends
+ * the real sub an email they can ignore.
+ */
 function actionWithdraw(data) {
   var sheet = getSheet('Requests');
   var row = findRowById(sheet, data.id);
   if (row === -1) return { status: 'error', message: 'That match is no longer listed.' };
 
-  var sub = subById(data.subId);
+  var status = String(sheet.getRange(row, colIndex(sheet, 'Status')).getValue()).trim();
+  var claimedBy = String(sheet.getRange(row, colIndex(sheet, 'Claimed By')).getValue()).trim();
+  if (status !== 'filled' || !claimedBy) {
+    return { status: 'error', message: 'Nobody is signed up for that match right now.' };
+  }
+  if (String(data.subId || '').trim() !== claimedBy) {
+    return { status: 'error', message: 'Only the sub who took this match can back out of it.' };
+  }
+
+  var sub = rawSub_(claimedBy);
+  if (!sub || !sub.email) {
+    return { status: 'error', message: 'We could not find an email address to confirm this with.' };
+  }
+
+  sendReleaseEmail_(data.id, sub);
+  return {
+    status: 'ok',
+    pending: true,
+    message: 'Check your email and tap the button to confirm. You stay on the match until you do.'
+  };
+}
+
+/** Reopens a filled match and gives the sub's slot back. */
+function doWithdraw_(requestId, subId) {
+  var sheet = getSheet('Requests');
+  var row = findRowById(sheet, requestId);
+  if (row === -1) return;
   var teamId = String(sheet.getRange(row, colIndex(sheet, 'TeamID')).getValue()).trim();
 
   sheet.getRange(row, colIndex(sheet, 'Status')).setValue('open');
@@ -825,10 +859,23 @@ function actionWithdraw(data) {
   sheet.getRange(row, colIndex(sheet, 'Nudged')).setValue(false);
 
   /* Backing out gives the slot back — it should not count against them. */
-  if (sub) { bumpSubCount(sub.id, -1); bumpTeamSub(sub.id, teamId, -1); }
-  notifyCaptainOfWithdrawal(data.id, sub);
+  bumpSubCount(subId, -1);
+  bumpTeamSub(subId, teamId, -1);
+  notifyCaptainOfWithdrawal(requestId, rawSub_(subId));
+}
 
-  return { status: 'ok', message: 'The captain has been notified and the spot is open again.' };
+/** A sub by ID whether or not they're still active, for someone backing out. */
+function rawSub_(subId) {
+  var sheet = getSheet('Subs');
+  var row = findRowById(sheet, subId);
+  if (row === -1) return null;
+  var get = function (header) { return sheet.getRange(row, colIndex(sheet, header)).getValue(); };
+  return {
+    id: String(get('SubID')).trim(),
+    name: String(get('Name')).trim(),
+    email: normEmail(get('Email')),
+    phone: String(get('Phone') || '').trim()
+  };
 }
 
 function actionCancelRequest(data) {
@@ -904,10 +951,33 @@ function badLink_() {
 function actionEmailVerify(data) {
   var hit = subRowForToken_(data.subId, data.token);
   if (!hit) return badLink_();
+  var sh = hit.sheet, r = hit.row;
 
-  hit.sheet.getRange(hit.row, colIndex(hit.sheet, 'Verified')).setValue(true);
-  hit.sheet.getRange(hit.row, colIndex(hit.sheet, 'Active')).setValue(true);
+  /* A signup for an address already on the list parks its changes until now. */
+  var changed = false;
+  var fields = ['Name', 'Phone', 'Level'];
+  for (var f = 0; f < fields.length; f++) {
+    var pendingCol = colIndex(sh, 'Pending ' + fields[f]);
+    var value = String(sh.getRange(r, pendingCol).getValue()).trim();
+    if (!value) continue;
+    sh.getRange(r, colIndex(sh, fields[f])).setValue(fields[f] === 'Level' ? normLevel(value) : value);
+    sh.getRange(r, pendingCol).setValue('');
+    changed = true;
+  }
+
+  sh.getRange(r, colIndex(sh, 'Verified')).setValue(true);
+  sh.getRange(r, colIndex(sh, 'Active')).setValue(true);
   var sub = subSummary_(hit);
+
+  if (changed) {
+    return {
+      status: 'ok',
+      title: 'Your changes are saved',
+      message: 'Thanks ' + sub.name + " — you're updated, and you'll hear about matches for " +
+               'teams rated ' + sub.level + ' and above.',
+      sub: sub
+    };
+  }
 
   return {
     status: 'ok',
@@ -951,6 +1021,33 @@ function actionEmailClaim(data) {
     title: "You're in",
     message: "You're subbing for " + described + '. ' + req.postedBy +
              ' has been notified and will text you the details.',
+    sub: sub
+  };
+}
+
+function actionEmailRelease(data) {
+  var hit = subRowForToken_(data.subId, data.token);
+  if (!hit) return badLink_();
+  var sub = subSummary_(hit);
+
+  var req = findRequest_(data.requestId);
+  if (!req || req.status === 'cancelled') {
+    return { status: 'error', title: 'Match not found',
+             message: 'That match is no longer listed. The captain may have cancelled it.' };
+  }
+
+  /* Tapped twice, or the spot has already moved on. */
+  if (req.status !== 'filled' || req.claimedBy !== sub.id) {
+    return { status: 'ok', title: "You're not on this match",
+             message: "Nothing to undo — you aren't signed up for this match any more.", sub: sub };
+  }
+
+  doWithdraw_(req.id, sub.id);
+  return {
+    status: 'ok',
+    title: "You're off this match",
+    message: 'Thanks for letting us know. ' + (req.postedBy || 'The captain') +
+             ' has been told, and the spot is open again.',
     sub: sub
   };
 }
@@ -1152,35 +1249,55 @@ function captainEmailByName_(name) {
   return '';
 }
 
-function sendVerifyEmail(subId, name, email, token) {
+function sendVerifyEmail(subId, name, email, token, change) {
   var url = appLink_({ verify: subId, t: token });
-  var body =
-    'Hi ' + name + ',\n\n' +
-    'Confirm your spot on the tennis sub list by opening this link:\n\n' + url + '\n\n' +
-    "Until you do, you won't receive any match requests.\n\n" +
-    "If you didn't sign up, just ignore this email.";
+  var subject, body, html;
 
-  var html = emailHtml({
-    heading: 'Confirm your spot',
-    lead: 'Hi ' + name + ' — one tap and you\'re on the sub list.',
-    buttonUrl: url,
-    buttonLabel: 'Confirm my spot',
-    after: "Until you do, you won't get any match requests.",
-    footer: "Didn't sign up? Just ignore this email and nothing happens."
-  });
+  if (change) {
+    /* Someone signed up again with an address that's already on the list. */
+    subject = 'Confirm your sub list changes';
+    body =
+      'Hi ' + name + ',\n\n' +
+      'We got a request to update your details on the tennis sub list:\n\n' +
+      'Level: ' + change.level + '\n' +
+      'Cell:  ' + change.phone + '\n\n' +
+      'To save these changes, open this link:\n\n' + url + '\n\n' +
+      "If you didn't ask for this, ignore this email and nothing changes.";
+    html = emailHtml({
+      heading: 'Confirm your changes',
+      lead: 'Hi ' + name + ' — tap below to save your updated sub list details.',
+      details: [['Level', change.level], ['Cell', change.phone]],
+      buttonUrl: url,
+      buttonLabel: 'Save my changes',
+      after: 'Nothing changes until you do.',
+      footer: "Didn't ask for this? Just ignore this email and nothing changes."
+    });
+  } else {
+    subject = 'Confirm your spot on the sub list';
+    body =
+      'Hi ' + name + ',\n\n' +
+      'Confirm your spot on the tennis sub list by opening this link:\n\n' + url + '\n\n' +
+      "Until you do, you won't receive any match requests.\n\n" +
+      "If you didn't sign up, just ignore this email.";
+    html = emailHtml({
+      heading: 'Confirm your spot',
+      lead: 'Hi ' + name + ' — one tap and you\'re on the sub list.',
+      buttonUrl: url,
+      buttonLabel: 'Confirm my spot',
+      after: "Until you do, you won't get any match requests.",
+      footer: "Didn't sign up? Just ignore this email and nothing happens."
+    });
+  }
 
   try {
-    sendMail_({
-      to: email, subject: 'Confirm your spot on the sub list',
-      body: body, htmlBody: html
-    }, '', '');
+    sendMail_({ to: email, subject: subject, body: body, htmlBody: html }, '', '');
   } catch (err) {
     Logger.log('Verify email failed for ' + email + ': ' + err);
   }
 }
 
 function sendAddedByCaptainEmail(subId, name, email, token, addedBy, level) {
-  var appUrl = getConfig('AppUrl');
+  var appUrl = appUrl_();
 
   var body =
     'Hi ' + name + ',\n\n' +
@@ -1283,6 +1400,111 @@ function notifySubsOfRequest(requestId, subIds) {
   return sent;
 }
 
+/** The request with this ID, or null. */
+function findRequest_(requestId) {
+  var reqs = loadRequests();
+  for (var i = 0; i < reqs.length; i++) if (reqs[i].id === requestId) return reqs[i];
+  return null;
+}
+
+/** When / Playing / Where / Vs rows for an email. */
+function matchDetails_(req) {
+  var details = [
+    ['When', prettyDate(req.date) + (req.time ? ' at ' + prettyTime(req.time) : '')],
+    ['Playing', req.matchType],
+    ['Where', req.location]
+  ];
+  if (req.opponent) details.push(['Vs', req.opponent]);
+  return details;
+}
+
+function matchDetailsText_(req) {
+  var rows = matchDetails_(req), out = '';
+  for (var i = 0; i < rows.length; i++) out += rows[i][0] + ': ' + rows[i][1] + '\n';
+  return out;
+}
+
+/**
+ * Sent to whoever just took a match: what they signed up for, who will text
+ * them, and a way out. Because it lands in the sub's own inbox, a claim made
+ * in someone else's name can't go unnoticed.
+ */
+function sendClaimReceipt_(requestId, sub) {
+  var req = findRequest_(requestId);
+  if (!req || !sub || !sub.email) return;
+
+  var team = teamById(req.teamId);
+  var posterName  = req.postedBy || team.captain;
+  var posterEmail = captainEmailByName_(posterName) || team.captainEmail;
+  var who = posterName || 'The captain';
+  var releaseUrl = appLink_({ release: req.id, sub: sub.id, t: subToken(sub.id) });
+
+  var body =
+    'Hi ' + sub.name + ',\n\n' +
+    "You're subbing for " + team.name + '. ' + who + ' will text you the details.\n\n' +
+    matchDetailsText_(req) +
+    (req.notes ? '\nNotes from ' + who + ':\n' + req.notes + '\n' : '') +
+    "\nCan't make it after all? Release your spot so the captain can find someone else:\n" +
+    releaseUrl;
+
+  var html = emailHtml({
+    heading: "You're subbing for " + team.name,
+    lead: 'Hi ' + sub.name + ' — ' + who + ' will text you the details.',
+    details: matchDetails_(req),
+    note: req.notes ? 'From ' + who + ': ' + req.notes : '',
+    footer: "Can't make it after all? " +
+      '<a href="' + esc_(releaseUrl) + '" style="color:#999;">Release your spot</a>' +
+      ' so the captain can find someone else.'
+  });
+
+  try {
+    sendMail_({
+      to: sub.email,
+      subject: "You're subbing — " + team.name + ', ' + prettyDate(req.date),
+      body: body, htmlBody: html
+    }, posterName, posterEmail);
+  } catch (err) {
+    Logger.log('Claim receipt failed for ' + sub.email + ': ' + err);
+  }
+}
+
+/** Asks the sub holding a spot to confirm they're giving it up. */
+function sendReleaseEmail_(requestId, sub) {
+  var req = findRequest_(requestId);
+  if (!req || !sub || !sub.email) return;
+
+  var team = teamById(req.teamId);
+  var posterName  = req.postedBy || team.captain;
+  var posterEmail = captainEmailByName_(posterName) || team.captainEmail;
+  /* go=1: this button is already the "are you sure", so the app won't ask again. */
+  var url = appLink_({ release: req.id, sub: sub.id, t: subToken(sub.id), go: 1 });
+
+  var body =
+    'Hi ' + sub.name + ',\n\n' +
+    'To give up your spot for ' + team.name + ', open this link:\n\n' + url + '\n\n' +
+    matchDetailsText_(req) +
+    '\nStill planning to play? Ignore this email and you stay on the match.';
+
+  var html = emailHtml({
+    heading: "Confirm you can't make it",
+    lead: 'Hi ' + sub.name + ' — tap below to give up your spot for ' + team.name + '.',
+    details: matchDetails_(req),
+    buttonUrl: url,
+    buttonLabel: 'Yes, release my spot',
+    after: 'Still planning to play? Ignore this email and you stay on the match.'
+  });
+
+  try {
+    sendMail_({
+      to: sub.email,
+      subject: "Confirm you're backing out — " + team.name + ', ' + prettyDate(req.date),
+      body: body, htmlBody: html
+    }, posterName, posterEmail);
+  } catch (err) {
+    Logger.log('Release email failed for ' + sub.email + ': ' + err);
+  }
+}
+
 function notifyCaptainOfClaim(requestId, sub) {
   var reqs = loadRequests();
   var req = null;
@@ -1302,7 +1524,7 @@ function notifyCaptainOfClaim(requestId, sub) {
     '\nReach ' + sub.name + ':\n' +
     '  ' + sub.email + '\n' +
     (sub.phone ? '  ' + sub.phone + '\n' : '') +
-    (getConfig('AppUrl') ? '\nOpen the app: ' + getConfig('AppUrl') : '');
+    '\nOpen the app: ' + appUrl_();
 
   var cc = getConfig('ManagerEmail');
   try {
@@ -1329,7 +1551,7 @@ function notifyCaptainOfWithdrawal(requestId, sub) {
     (sub ? sub.name : 'Your sub') + ' can no longer play ' + team.name +
     ' on ' + matchWhen_(req) + '.\n\n' +
     'The spot is open again. Open the app to notify more subs:\n' +
-    (getConfig('AppUrl') || webAppUrl());
+    appUrl_();
 
   try {
     sendMail_({
@@ -1383,7 +1605,7 @@ function sendNoResponseNudges() {
   var hours = Number(getConfig('NudgeHours')) || 24;
   var cutoff = new Date().getTime() - hours * 3600 * 1000;
   var nudgedCol = colIndex(sheet, 'Nudged');
-  var appUrl = getConfig('AppUrl') || webAppUrl();
+  var appUrl = appUrl_();
 
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i];
