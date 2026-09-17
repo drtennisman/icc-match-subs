@@ -70,9 +70,14 @@ still work.
 The app knows a sub by an ID that anyone can see, so anything that changes a sub's
 record is confirmed from **their own inbox** with a tokenized link:
 
-- **Signing up again with an address already on the list** changes nothing. The new
-  name, phone and level are parked in the `Pending …` columns and a "Confirm your
-  changes" email goes to that address; they're applied only when its button is tapped.
+- **One person, one spot.** A signup with an email or cell that's already on the list is
+  refused ("You're already signed up"). The app offers **Update my details instead**: the
+  new values are parked in the `Pending …` columns and a "Confirm your changes" email goes
+  to that address, applied only when its button is tapped. Someone who signed up but never
+  confirmed gets their link re-sent (so a typo'd first try can't lock them out), and
+  someone who opted out can rejoin. Captains can't manually add a duplicate either.
+- **The signup form always starts blank.** A phone may have been used by a captain or
+  someone else, so no name is ever carried into it.
 - **Backing out of a match** ("I can no longer play") emails the sub a confirm button.
   The spot stays theirs until they tap it — then the captain is told and it reopens.
 - **Every claim sends the sub a receipt** with a "Release your spot" link. Beyond being

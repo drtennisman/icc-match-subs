@@ -8,7 +8,7 @@
  * then redeploy with Deploy → Manage deployments → edit → New version.
  */
 
-var VERSION = 12;
+var VERSION = 13;
 
 /* Sheet tabs are created automatically on first run. */
 var TABS = {
@@ -224,6 +224,35 @@ function isTrue(v) {
 /** At least 10 digits, so "n/a" or a stray word doesn't pass as a number. */
 function hasUsablePhone(v) {
   return String(v || '').replace(/\D/g, '').length >= 10;
+}
+
+/** Last 10 digits, so "(205) 555-0123" and "+1 205-555-0123" count as the same cell. */
+function phoneKey_(v) {
+  var d = String(v || '').replace(/\D/g, '');
+  return d.length >= 10 ? d.slice(-10) : '';
+}
+
+/** Blank Active counts as active, matching how loadSubs reads the tab. */
+function isActiveRow_(row) {
+  return row.Active === '' || row.Active === undefined || isTrue(row.Active);
+}
+
+/**
+ * Another confirmed, active sub already using this cell, if any. That is
+ * almost always the same person signing up again under a second address.
+ * Unconfirmed rows don't count, so a signup with a typo'd email can't lock
+ * its owner out of trying again with the right one.
+ */
+function subWithPhone_(rows, phone, exceptRow) {
+  var key = phoneKey_(phone);
+  if (!key) return null;
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    if (row === exceptRow) continue;
+    if (!isActiveRow_(row) || !isTrue(row.Verified)) continue;
+    if (phoneKey_(row.Phone) === key) return row;
+  }
+  return null;
 }
 
 function normEmail(e) {
@@ -617,10 +646,23 @@ function doPost(e) {
    SIGNUP & PROFILE
    ═══════════════════════════════════════════════════════ */
 
+/**
+ * One person, one spot on the list.
+ *
+ *   New email, new cell        -> added, confirmation emailed
+ *   Email already on the list  -> refused ("already"), unless mode is
+ *                                 "update", which parks the new details and
+ *                                 emails a confirm-your-changes link
+ *   ...but never confirmed     -> link re-sent ("resend"); new details apply on confirm
+ *   ...but opted out           -> may rejoin ("rejoin") once they confirm
+ *   Cell already on the list   -> refused ("phoneTaken")
+ */
 function actionSignup(data) {
+  var wantsUpdate = data.mode === 'update';
   var name  = String(data.name || '').trim();
   var email = normEmail(data.email);
-  if (!name)  return { status: 'error', message: 'Name is required.' };
+  /* Updating details, a blank name means "keep the one on file". */
+  if (!name && !wantsUpdate) return { status: 'error', message: 'Name is required.' };
   if (!email || email.indexOf('@') === -1) return { status: 'error', message: 'A valid email is required.' };
   /* Captains text their sub once the spot is taken, so a number is required. */
   if (!hasUsablePhone(data.phone)) {
@@ -629,36 +671,76 @@ function actionSignup(data) {
 
   var sheet = getSheet('Subs');
   var rows = sheetToObjects(sheet);
+  var newPhone = String(data.phone || '').trim();
+  var newLevel = normLevel(data.level);
 
-  /*
-   * Already on the list? Nothing changes until whoever owns that inbox
-   * confirms it. Updating in place would let anyone who knows a member's
-   * email address replace their phone number or level just by signing up.
-   */
+  var existing = null;
   for (var i = 0; i < rows.length; i++) {
-    if (normEmail(rows[i].Email) === email) {
-      var existingRow = rows[i]._row;
-      var existingId = String(rows[i].SubID).trim();
-      var token = String(rows[i].Token).trim();
-      if (!token) {
-        token = makeToken();
-        sheet.getRange(existingRow, colIndex(sheet, 'Token')).setValue(token);
-      }
-      var newPhone = String(data.phone || '').trim();
-      var newLevel = normLevel(data.level);
-      sheet.getRange(existingRow, colIndex(sheet, 'Pending Name')).setValue(name);
-      sheet.getRange(existingRow, colIndex(sheet, 'Pending Phone')).setValue(newPhone);
-      sheet.getRange(existingRow, colIndex(sheet, 'Pending Level')).setValue(newLevel);
+    if (normEmail(rows[i].Email) === email) { existing = rows[i]; break; }
+  }
 
-      sendVerifyEmail(existingId, name, email, token, { level: newLevel, phone: newPhone });
+  if (subWithPhone_(rows, newPhone, existing)) {
+    return {
+      status: 'error',
+      code: 'phoneTaken',
+      message: 'That cell number is already on the sub list under a different email. ' +
+               'If you changed email addresses, ask your captain to update it.'
+    };
+  }
+
+  if (existing) {
+    var active = isActiveRow_(existing);
+    var verified = isTrue(existing.Verified);
+
+    if (active && verified && !wantsUpdate) {
       return {
-        status: 'ok',
-        subId: existingId,
-        verified: isTrue(rows[i].Verified),
-        pending: true,
-        message: 'Check your email to confirm. Nothing changes until you tap the link.'
+        status: 'error',
+        code: 'already',
+        message: "That email is already on the sub list. Want to change your level or cell instead? " +
+                 "We'll email you a link to confirm."
       };
     }
+
+    /*
+     * Nothing changes until whoever owns that inbox confirms it. Updating in
+     * place would let anyone who knows a member's email address replace their
+     * phone number or level.
+     */
+    var kind = !active ? 'rejoin' : (!verified ? 'resend' : 'update');
+    var existingRow = existing._row;
+    var existingId = String(existing.SubID).trim();
+    var token = String(existing.Token).trim();
+    if (!token) {
+      token = makeToken();
+      sheet.getRange(existingRow, colIndex(sheet, 'Token')).setValue(token);
+    }
+    sheet.getRange(existingRow, colIndex(sheet, 'Pending Name')).setValue(name);
+    sheet.getRange(existingRow, colIndex(sheet, 'Pending Phone')).setValue(newPhone);
+    sheet.getRange(existingRow, colIndex(sheet, 'Pending Level')).setValue(newLevel);
+
+    var greetName = name || String(existing.Name).trim();
+    sendVerifyEmail(existingId, greetName, email, token,
+                    kind === 'update' ? { level: newLevel, phone: newPhone } : null);
+    return {
+      status: 'ok',
+      subId: existingId,
+      verified: active && verified,
+      pending: true,
+      kind: kind,
+      message: kind === 'update'
+        ? 'Check your email to confirm. Nothing changes until you tap the link.'
+        : kind === 'resend'
+          ? "You'd already signed up but hadn't confirmed yet, so we re-sent your link."
+          : 'Welcome back! Check your email and tap the link to rejoin.'
+    };
+  }
+
+  if (wantsUpdate) {
+    return {
+      status: 'error',
+      code: 'notFound',
+      message: "That email isn't on the sub list. Check it matches the one you signed up with."
+    };
   }
 
   var id = newId('s');
@@ -691,6 +773,9 @@ function actionAddSub(data) {
     if (normEmail(rows[i].Email) === email) {
       return { status: 'error', message: name + ' is already on the sub list.' };
     }
+  }
+  if (subWithPhone_(rows, data.phone, null)) {
+    return { status: 'error', message: 'That cell number is already on the sub list.' };
   }
 
   var id = newId('s');
@@ -960,9 +1045,16 @@ function actionEmailVerify(data) {
     var pendingCol = colIndex(sh, 'Pending ' + fields[f]);
     var value = String(sh.getRange(r, pendingCol).getValue()).trim();
     if (!value) continue;
-    sh.getRange(r, colIndex(sh, fields[f])).setValue(fields[f] === 'Level' ? normLevel(value) : value);
+    var liveCol = colIndex(sh, fields[f]);
+    var next = fields[f] === 'Level' ? normLevel(value) : value;
+    var current = fields[f] === 'Level'
+      ? normLevel(sh.getRange(r, liveCol).getValue())
+      : String(sh.getRange(r, liveCol).getValue()).trim();
+    if (next !== current) {
+      sh.getRange(r, liveCol).setValue(next);
+      changed = true;
+    }
     sh.getRange(r, pendingCol).setValue('');
-    changed = true;
   }
 
   sh.getRange(r, colIndex(sh, 'Verified')).setValue(true);

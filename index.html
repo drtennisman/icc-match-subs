@@ -312,12 +312,12 @@
   <!-- ══════════ SUB SIGNUP ══════════ -->
   <div class="screen" id="signupScreen">
     <div class="card">
-      <h2>Sign up to sub</h2>
-      <p class="card-sub">Three quick things and you're on the list. You'll only be emailed when a team at your level actually needs someone.</p>
+      <h2 id="suTitle">Sign up to sub</h2>
+      <p class="card-sub" id="suIntro">Three quick things and you're on the list. You'll only be emailed when a team at your level actually needs someone.</p>
 
       <div class="form-group">
         <label for="suName">Your name</label>
-        <input type="text" id="suName" placeholder="First and last name" autocomplete="name">
+        <input type="text" id="suName" placeholder="First and last name" autocomplete="off" autocapitalize="words">
       </div>
       <div class="form-group">
         <label for="suEmail">Email</label>
@@ -567,7 +567,7 @@
 /* ═══════════════════════════════════════════════════════
    CONFIG
    ═══════════════════════════════════════════════════════ */
-const APP_VERSION = 12; // must match VERSION in google-apps-script.js
+const APP_VERSION = 13; // must match VERSION in google-apps-script.js
 
 /*
  * Paste the deployed Apps Script Web App URL here once it exists.
@@ -918,8 +918,16 @@ async function chooseRole(role) {
   await ensureData();
 
   if (role === 'sub') {
-    buildSignupPickers();
-    showScreen('signupScreen');
+    // Already a confirmed sub on this phone? Don't offer a second signup.
+    const rec = SUBS.find(s => s.id === me.subId);
+    if (rec && rec.verified) {
+      document.getElementById('bottomNav').style.display = 'flex';
+      updateChrome();
+      navigate('matchesScreen', document.getElementById('tabMatches'));
+      showToast("You're already signed up");
+      return;
+    }
+    startSignup('new');
   } else {
     document.getElementById('bottomNav').style.display = 'flex';
     updateChrome();
@@ -964,23 +972,48 @@ async function verifyCaptainPin() {
   showToast('Captain tools unlocked');
 }
 
+/*
+ * 'new'    — a fresh signup. Always starts blank: this phone may belong to a
+ *            captain or someone else, and their name must never carry over.
+ * 'update' — someone already on the list changing their level or cell. The
+ *            server emails them a confirm link; nothing changes until they tap it.
+ */
+let signupMode = 'new';
+let signupLevel = '';
+
+function startSignup(mode) {
+  signupMode = mode === 'update' ? 'update' : 'new';
+  buildSignupPickers();
+  showScreen('signupScreen');
+}
+
 function buildSignupPickers() {
-  const lvlBox = document.getElementById('suLevels');
-  lvlBox.innerHTML = LEVELS.map(l =>
-    '<button type="button" class="chip' + (me.level === l ? ' selected' : '') +
+  const updating = signupMode === 'update';
+  signupLevel = updating ? (me.level || '') : '';
+
+  document.getElementById('suLevels').innerHTML = LEVELS.map(l =>
+    '<button type="button" class="chip' + (signupLevel === l ? ' selected' : '') +
     '" data-level="' + l + '" onclick="pickLevel(this)">' + l + '</button>'
   ).join('');
 
-  document.getElementById('suName').value  = me.name;
-  document.getElementById('suEmail').value = me.email;
-  document.getElementById('suPhone').value = me.phone;
+  // The name is never filled in, in either mode.
+  document.getElementById('suName').value  = '';
+  document.getElementById('suEmail').value = updating ? (me.email || '') : '';
+  document.getElementById('suPhone').value = updating ? (me.phone || '') : '';
+
+  document.getElementById('suTitle').textContent = updating ? 'Change my details' : 'Sign up to sub';
+  document.getElementById('suIntro').textContent = updating
+    ? "Update your level or cell. We'll email you a link to confirm, and nothing changes until you tap it."
+    : "Three quick things and you're on the list. You'll only be emailed when a team at your level actually needs someone.";
+  document.getElementById('suName').placeholder = updating ? 'Leave blank to keep your name' : 'First and last name';
+  document.getElementById('suSubmit').textContent = updating ? 'Send confirmation link' : 'Sign me up';
 }
 
 /** One level per person — picking a chip clears the others. */
 function pickLevel(el) {
   el.parentNode.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
   el.classList.add('selected');
-  me.level = el.dataset.level;
+  signupLevel = el.dataset.level;
 }
 
 async function submitSignup() {
@@ -988,17 +1021,18 @@ async function submitSignup() {
   const email = document.getElementById('suEmail').value.trim();
   const phone = document.getElementById('suPhone').value.trim();
 
-  if (!name)  return showToast('Add your name');
+  const updating = signupMode === 'update';
+
+  if (!name && !updating) return showToast('Add your name');
   if (!email || email.indexOf('@') === -1 || email.indexOf('.') === -1) return showToast('Check your email address');
   if (!hasUsablePhone(phone)) return showToast('Add your cell number — captains text you once you accept');
-  if (!me.level) return showToast('Pick your level');
+  if (!signupLevel) return showToast('Pick your level');
 
-  me.name = name; me.email = email; me.phone = phone;
-  saveMe();
-
-  setVerifyCopy(email, false);
+  setVerifyCopy(email, 'new');
 
   if (DEMO_MODE) {
+    if (name) me.name = name;
+    me.email = email; me.phone = phone; me.level = signupLevel;
     me.verified = false;
     saveMe();
     showScreen('verifyScreen');
@@ -1007,35 +1041,48 @@ async function submitSignup() {
   }
 
   const btn = document.getElementById('suSubmit');
-  btn.disabled = true; btn.textContent = 'Signing you up…';
+  const idleLabel = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Sending…';
 
   const resp = await postAPI({
-    action: 'signup', name: name, email: email, phone: phone,
-    level: me.level
+    action: 'signup', mode: signupMode, name: name, email: email, phone: phone,
+    level: signupLevel
   });
 
-  btn.disabled = false; btn.textContent = 'Sign me up';
+  btn.disabled = false; btn.textContent = idleLabel;
 
-  if (resp.status !== 'ok') return showToast(resp.message || 'Signup failed — try again');
+  if (resp.status !== 'ok') {
+    if (resp.code === 'already') {
+      // Same email is already signed up: offer the confirmed update instead.
+      return showModal("You're already signed up", resp.message,
+        'Update my details instead', () => { signupMode = 'update'; submitSignup(); });
+    }
+    return showToast(resp.message || 'Signup failed — try again');
+  }
 
+  if (name) me.name = name;
+  me.email = email; me.phone = phone; me.level = signupLevel;
   if (resp.subId) me.subId = resp.subId;
   me.verified = !!resp.verified;
   saveMe();
   dataLoaded = false;
 
-  // Changes to someone already on the list wait for them to confirm by email,
-  // so an existing sub lands here too, just with different wording.
-  setVerifyCopy(email, !!resp.pending);
+  setVerifyCopy(email, resp.kind || 'new');
   showScreen('verifyScreen');
   document.getElementById('bottomNav').style.display = 'none';
 }
 
-function setVerifyCopy(email, isChange) {
-  document.getElementById('verifyCopy').innerHTML = isChange
-    ? 'We sent a link to <strong id="verifyEmail">' + esc(email) + '</strong>. ' +
-      'Tap it to save your changes. Nothing updates until you do.'
-    : 'We sent a confirmation link to <strong id="verifyEmail">' + esc(email) + '</strong>. ' +
-      "Tap it and you're on the sub list. You won't get any match emails until you do.";
+function setVerifyCopy(email, kind) {
+  const to = '<strong id="verifyEmail">' + esc(email) + '</strong>';
+  const copy = {
+    update: 'We sent a link to ' + to + '. Tap it to save your changes. Nothing updates until you do.',
+    resend: "You'd already signed up but hadn't confirmed yet, so we re-sent your link to " + to +
+            ". Tap it and you're on the sub list.",
+    rejoin: 'Welcome back! We sent a link to ' + to + '. Tap it to rejoin the sub list.'
+  };
+  document.getElementById('verifyCopy').innerHTML = copy[kind] ||
+    'We sent a confirmation link to ' + to + ". Tap it and you're on the sub list. " +
+    "You won't get any match emails until you do.";
 }
 
 /** After the user says they clicked the confirmation link. */
@@ -1881,10 +1928,10 @@ function renderMe() {
       '</div></div></div>' +
       '<div class="list-row"><div><div class="list-name">You can be asked by</div>' +
       '<div class="list-detail">Teams rated ' + (esc(me.level) || '—') + ' and above</div></div></div>' +
-      '<button class="btn btn-outline" style="margin-top:14px;" onclick="editSignup()">Change my level</button>';
+      '<button class="btn btn-outline" style="margin-top:14px;" onclick="startSignup(\'update\')">Change my details</button>';
   } else {
     html += '<div class="notice">You\'re not on the sub list. Sign up and captains can start calling on you.</div>' +
-      '<button class="btn btn-primary" onclick="editSignup()">Sign up to sub</button>';
+      '<button class="btn btn-primary" onclick="startSignup(\'new\')">Sign up to sub</button>';
   }
 
   html += '</div>';
@@ -1922,11 +1969,6 @@ function renderMe() {
   box.innerHTML = html;
 }
 
-function editSignup() {
-  buildSignupPickers();
-  document.getElementById('bottomNav').style.display = 'flex';
-  showScreen('signupScreen');
-}
 
 function openCaptainGate() {
   buildCaptainPicker();
@@ -2081,10 +2123,10 @@ async function boot() {
   const invited = /[?&]join=/.test(location.search);
   if (invited && !(me.verified && me.subId)) {
     await ensureData();
-    me.role = 'sub';
+    // A captain opening an invite link to try it shouldn't lose captain mode.
+    if (me.role !== 'captain') me.role = 'sub';
     saveMe();
-    buildSignupPickers();
-    showScreen('signupScreen');
+    startSignup('new');
     document.getElementById('bottomNav').style.display = 'none';
     return;
   }
