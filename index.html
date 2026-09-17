@@ -1026,30 +1026,45 @@ async function submitSignup() {
   if (!hasUsablePhone(phone)) return showToast('Add your cell number — captains text you once you accept');
   if (!signupLevel) return showToast('Pick your level');
 
-  setVerifyCopy(email, 'new');
+  /*
+   * Move to the next screen straight away. Signing up waits on Google, which
+   * takes anywhere from under a second to several, and sitting on a button
+   * that long makes the app feel stuck. The continue button stays hidden until
+   * the server actually answers, so nobody is told to check an inbox before
+   * the email has been sent.
+   */
+  const nav = document.getElementById('bottomNav');
+  const navWas = nav.style.display;
+  const continueBtn = document.getElementById('verifyBtn');
 
-  if (DEMO_MODE) {
+  setVerifyCopy(email, 'sending');
+  continueBtn.style.display = 'none';
+  showScreen('verifyScreen');
+  nav.style.display = 'none';
+
+  const finish = kind => {
     if (name) me.name = name;
     me.email = email; me.phone = phone; me.level = signupLevel;
-    me.verified = false;
+    me.verified = !!(kind && kind.verified);
+    if (kind && kind.subId) me.subId = kind.subId;
     saveMe();
-    showScreen('verifyScreen');
-    document.getElementById('bottomNav').style.display = 'none';
-    return;
-  }
+    dataLoaded = false;
+    setVerifyCopy(email, (kind && kind.kind) || 'new');
+    continueBtn.style.display = '';
+  };
 
-  const btn = document.getElementById('suSubmit');
-  const idleLabel = btn.textContent;
-  btn.disabled = true; btn.textContent = 'Sending…';
+  if (DEMO_MODE) return finish(null);
 
   const resp = await postAPI({
     action: 'signup', mode: signupMode, name: name, email: email, phone: phone,
     level: signupLevel
   });
 
-  btn.disabled = false; btn.textContent = idleLabel;
-
   if (resp.status !== 'ok') {
+    // Back to the form with everything they typed still in it.
+    showScreen('signupScreen');
+    nav.style.display = navWas;
+    continueBtn.style.display = '';
     if (resp.code === 'already') {
       // Same email is already signed up: offer the confirmed update instead.
       return showModal("You're already signed up", resp.message,
@@ -1058,21 +1073,13 @@ async function submitSignup() {
     return showToast(resp.message || 'Signup failed — try again');
   }
 
-  if (name) me.name = name;
-  me.email = email; me.phone = phone; me.level = signupLevel;
-  if (resp.subId) me.subId = resp.subId;
-  me.verified = !!resp.verified;
-  saveMe();
-  dataLoaded = false;
-
-  setVerifyCopy(email, resp.kind || 'new');
-  showScreen('verifyScreen');
-  document.getElementById('bottomNav').style.display = 'none';
+  finish(resp);
 }
 
 function setVerifyCopy(email, kind) {
   const to = '<strong id="verifyEmail">' + esc(email) + '</strong>';
   const copy = {
+    sending: 'Sending your confirmation email to ' + to + '…',
     update: 'We sent a link to ' + to + '. Tap it to save your changes. Nothing updates until you do.',
     resend: "You'd already signed up but hadn't confirmed yet, so we re-sent your link to " + to +
             ". Tap it and you're on the sub list.",
