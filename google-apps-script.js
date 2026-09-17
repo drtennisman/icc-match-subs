@@ -8,7 +8,7 @@
  * then redeploy with Deploy → Manage deployments → edit → New version.
  */
 
-var VERSION = 13;
+var VERSION = 14;
 
 /* Sheet tabs are created automatically on first run. */
 var TABS = {
@@ -36,26 +36,90 @@ var DEFAULT_CONFIG = [
    SHEET PLUMBING
    ═══════════════════════════════════════════════════════ */
 
-function ss() { return SpreadsheetApp.getActiveSpreadsheet(); }
+/*
+ * Per-request cache.
+ *
+ * Every call to Sheets is a round trip (measured ~0.4s each, live), and this
+ * script used to make hundreds per request: opening the app with 40 subs took
+ * 432 of them and posting a match over 3,600, which is longer than Apps Script
+ * lets a request run. Now each tab is read once per request and the copy is
+ * kept in step with every write, which all go through cellSet_ and
+ * appendByHeader. Apps Script starts every request and trigger run with fresh
+ * globals, so nothing is shared between requests. Anything that reads before
+ * taking the script lock must call resetCache_() once it has the lock, so a
+ * claim is never decided on a pre-lock snapshot.
+ */
+var _cache;
+function resetCache_() {
+  _cache = { book: null, tz: null, sheets: {}, values: {} };
+}
+resetCache_();
+
+function ss() {
+  return _cache.book || (_cache.book = SpreadsheetApp.getActiveSpreadsheet());
+}
+
+function tz_() {
+  return _cache.tz || (_cache.tz = ss().getSpreadsheetTimeZone());
+}
 
 function getSheet(name) {
+  if (_cache.sheets[name]) return _cache.sheets[name];
   var book = ss();
   var sheet = book.getSheetByName(name);
+
   if (!sheet) {
     sheet = book.insertSheet(name);
+    _cache.sheets[name] = sheet;
+    var values = [];
     var headers = TABS[name];
     if (headers) {
       sheet.getRange(1, 1, 1, headers.length).setValues([headers])
            .setFontWeight('bold').setBackground('#021f3d').setFontColor('#ffffff');
       sheet.setFrozenRows(1);
+      values.push(headers.slice());
     }
     if (name === 'Config') {
       sheet.getRange(2, 1, DEFAULT_CONFIG.length, 2).setValues(DEFAULT_CONFIG);
+      for (var i = 0; i < DEFAULT_CONFIG.length; i++) values.push(DEFAULT_CONFIG[i].slice());
     }
-  } else if (TABS[name]) {
-    ensureColumns(sheet, TABS[name]);
+    _cache.values[name] = values;
+    return sheet;
   }
+
+  _cache.sheets[name] = sheet;
+  if (TABS[name]) ensureColumns(sheet, TABS[name]);
   return sheet;
+}
+
+/** The tab name for a sheet object handed out by getSheet. */
+function nameOf_(sheet) {
+  for (var n in _cache.sheets) {
+    if (_cache.sheets[n] === sheet) return n;
+  }
+  var name = sheet.getName();
+  _cache.sheets[name] = sheet;
+  return name;
+}
+
+/** The tab's full contents, read at most once per request. */
+function values_(sheet) {
+  var name = nameOf_(sheet);
+  if (!_cache.values[name]) _cache.values[name] = sheet.getDataRange().getValues();
+  return _cache.values[name];
+}
+
+function cellGet_(sheet, row, col) {
+  var r = values_(sheet)[row - 1];
+  var v = r ? r[col - 1] : undefined;
+  return v === undefined ? '' : v;
+}
+
+function cellSet_(sheet, row, col, value) {
+  var values = values_(sheet);
+  sheet.getRange(row, col).setValue(value);
+  while (values.length < row) values.push([]);
+  values[row - 1][col - 1] = value;
 }
 
 /**
@@ -66,32 +130,36 @@ function getSheet(name) {
  * alone — including ones no longer used — so nothing is ever destroyed.
  */
 function ensureColumns(sheet, wanted) {
-  var lastCol = sheet.getLastColumn();
-  var existing = lastCol > 0
-    ? sheet.getRange(1, 1, 1, lastCol).getValues()[0]
-    : [];
+  var values = values_(sheet);
+  var header = values[0] || [];
+  var lastCol = 0;
+  for (var i = 0; i < header.length; i++) {
+    if (String(header[i]) !== '') lastCol = i + 1;
+  }
 
   var missing = [];
-  for (var i = 0; i < wanted.length; i++) {
-    if (existing.indexOf(wanted[i]) === -1) missing.push(wanted[i]);
+  for (var j = 0; j < wanted.length; j++) {
+    if (header.indexOf(wanted[j]) === -1) missing.push(wanted[j]);
   }
   if (!missing.length) return;
 
   sheet.getRange(1, lastCol + 1, 1, missing.length).setValues([missing])
        .setFontWeight('bold').setBackground('#021f3d').setFontColor('#ffffff');
+  var updated = header.slice(0, lastCol).concat(missing);
+  if (values.length) values[0] = updated; else values.push(updated);
 }
 
 function sheetToObjects(sheet) {
-  var values = sheet.getDataRange().getValues();
+  var values = values_(sheet);
   if (values.length < 2) return [];
   var headers = values[0];
   var out = [];
   for (var i = 1; i < values.length; i++) {
-    var row = values[i];
+    var row = values[i] || [];
     if (row.join('') === '') continue;
     var obj = { _row: i + 1 };
     for (var c = 0; c < headers.length; c++) {
-      if (headers[c] !== '') obj[headers[c]] = row[c];
+      if (headers[c] !== '') obj[headers[c]] = row[c] === undefined ? '' : row[c];
     }
     out.push(obj);
   }
@@ -107,29 +175,29 @@ function sheetToObjects(sheet) {
  * without corrupting anything.
  */
 function appendByHeader(sheet, obj) {
-  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var values = values_(sheet);
+  var headers = values[0] || [];
   var row = [];
   for (var i = 0; i < headers.length; i++) {
     var key = headers[i];
     row.push(obj[key] === undefined ? '' : obj[key]);
   }
   sheet.appendRow(row);
+  values.push(row);
 }
 
 function findRowById(sheet, id) {
-  var values = sheet.getDataRange().getValues();
+  var values = values_(sheet);
   for (var i = 1; i < values.length; i++) {
-    if (String(values[i][0]) === String(id)) return i + 1;
+    if (values[i] && String(values[i][0]) === String(id)) return i + 1;
   }
   return -1;
 }
 
 function colIndex(sheet, header) {
-  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  for (var i = 0; i < headers.length; i++) {
-    if (headers[i] === header) return i + 1;
-  }
-  return -1;
+  var headers = values_(sheet)[0] || [];
+  var i = headers.indexOf(header);
+  return i === -1 ? -1 : i + 1;
 }
 
 function jsonResponse(obj) {
@@ -335,25 +403,25 @@ function bumpTeamSub(subId, teamId, delta) {
 
   var seasonCol = colIndex(sheet, 'Season');
   var subsCol   = colIndex(sheet, 'Team Subs');
-  var season    = String(sheet.getRange(row, seasonCol).getValue()).trim();
+  var season    = String(cellGet_(sheet, row, seasonCol)).trim();
 
   var counts;
   if (season !== currentSeason()) {
     counts = {};
-    sheet.getRange(row, seasonCol).setValue(currentSeason());
+    cellSet_(sheet, row, seasonCol, currentSeason());
   } else {
-    counts = parseTeamSubs(sheet.getRange(row, subsCol).getValue());
+    counts = parseTeamSubs(cellGet_(sheet, row, subsCol));
   }
 
   counts[teamId] = Math.max(0, (counts[teamId] || 0) + delta);
-  sheet.getRange(row, subsCol).setValue(formatTeamSubs(counts));
+  cellSet_(sheet, row, subsCol, formatTeamSubs(counts));
 }
 
 /** Sheet cells come back as Date objects or strings — normalize to YYYY-MM-DD. */
 function toDateString(v) {
   if (!v) return '';
   if (Object.prototype.toString.call(v) === '[object Date]') {
-    return Utilities.formatDate(v, ss().getSpreadsheetTimeZone(), 'yyyy-MM-dd');
+    return Utilities.formatDate(v, tz_(), 'yyyy-MM-dd');
   }
   return String(v).trim();
 }
@@ -362,7 +430,7 @@ function toDateString(v) {
 function toTimeString(v) {
   if (!v) return '';
   if (Object.prototype.toString.call(v) === '[object Date]') {
-    return Utilities.formatDate(v, ss().getSpreadsheetTimeZone(), 'HH:mm');
+    return Utilities.formatDate(v, tz_(), 'HH:mm');
   }
   return String(v).trim();
 }
@@ -380,7 +448,7 @@ function prettyDate(dateStr) {
   var parts = String(dateStr).split('-');
   if (parts.length !== 3) return dateStr;
   var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-  return Utilities.formatDate(d, ss().getSpreadsheetTimeZone(), 'EEEE, MMMM d');
+  return Utilities.formatDate(d, tz_(), 'EEEE, MMMM d');
 }
 
 function prettyTime(timeStr) {
@@ -412,7 +480,7 @@ function loadTeams() {
     var id = String(r.TeamID).trim();
     if (!id) {
       id = newId('t');
-      sheet.getRange(r._row, idCol).setValue(id);
+      cellSet_(sheet, r._row, idCol, id);
     }
     if (r.Active !== '' && r.Active !== undefined && !isTrue(r.Active)) continue;
 
@@ -611,6 +679,7 @@ function doPost(e) {
   } catch (err) {
     return jsonResponse({ status: 'error', message: 'Server busy — try again in a moment.' });
   }
+  resetCache_();
 
   /* Anything that posts on a team's behalf or touches the roster needs the PIN. */
   var captainOnly = ['addSub', 'postRequest', 'notifyMore', 'cancelRequest'];
@@ -712,11 +781,11 @@ function actionSignup(data) {
     var token = String(existing.Token).trim();
     if (!token) {
       token = makeToken();
-      sheet.getRange(existingRow, colIndex(sheet, 'Token')).setValue(token);
+      cellSet_(sheet, existingRow, colIndex(sheet, 'Token'), token);
     }
-    sheet.getRange(existingRow, colIndex(sheet, 'Pending Name')).setValue(name);
-    sheet.getRange(existingRow, colIndex(sheet, 'Pending Phone')).setValue(newPhone);
-    sheet.getRange(existingRow, colIndex(sheet, 'Pending Level')).setValue(newLevel);
+    cellSet_(sheet, existingRow, colIndex(sheet, 'Pending Name'), name);
+    cellSet_(sheet, existingRow, colIndex(sheet, 'Pending Phone'), newPhone);
+    cellSet_(sheet, existingRow, colIndex(sheet, 'Pending Level'), newLevel);
 
     var greetName = name || String(existing.Name).trim();
     sendVerifyEmail(existingId, greetName, email, token,
@@ -826,7 +895,7 @@ function actionNotifyMore(data) {
   if (row === -1) return { status: 'error', message: 'That match is no longer listed.' };
 
   var col = colIndex(sheet, 'Notified');
-  var existing = splitList(sheet.getRange(row, col).getValue());
+  var existing = splitList(cellGet_(sheet, row, col));
   var added = [];
   var incoming = data.notified || [];
 
@@ -838,9 +907,9 @@ function actionNotifyMore(data) {
   }
   if (!added.length) return { status: 'error', message: 'Those subs were already notified.' };
 
-  sheet.getRange(row, col).setValue(existing.join(', '));
+  cellSet_(sheet, row, col, existing.join(', '));
   /* Reset the nudge clock so the captain gets chased again if this round goes quiet. */
-  sheet.getRange(row, colIndex(sheet, 'Nudged')).setValue(false);
+  cellSet_(sheet, row, colIndex(sheet, 'Nudged'), false);
 
   var sent = notifySubsOfRequest(data.id, added);
   return { status: 'ok', emailed: sent, message: sent + ' more notified.' };
@@ -852,14 +921,14 @@ function actionClaim(data) {
   if (row === -1) return { status: 'error', message: 'That match is no longer listed.' };
 
   var statusCol = colIndex(sheet, 'Status');
-  if (String(sheet.getRange(row, statusCol).getValue()).trim() !== 'open') {
+  if (String(cellGet_(sheet, row, statusCol)).trim() !== 'open') {
     return { status: 'error', message: 'Someone else just claimed this one.' };
   }
 
   var sub = subById(data.subId);
   if (!sub) return { status: 'error', message: 'We could not find you on the sub list.' };
 
-  var teamId = String(sheet.getRange(row, colIndex(sheet, 'TeamID')).getValue()).trim();
+  var teamId = String(cellGet_(sheet, row, colIndex(sheet, 'TeamID'))).trim();
   var team = teamById(teamId);
   var cap = maxSubsPerTeam();
   var used = (sub.teamSubs || {})[teamId] || 0;
@@ -877,9 +946,9 @@ function actionClaim(data) {
     };
   }
 
-  sheet.getRange(row, statusCol).setValue('filled');
-  sheet.getRange(row, colIndex(sheet, 'Claimed By')).setValue(sub.id);
-  sheet.getRange(row, colIndex(sheet, 'Claimed At')).setValue(new Date());
+  cellSet_(sheet, row, statusCol, 'filled');
+  cellSet_(sheet, row, colIndex(sheet, 'Claimed By'), sub.id);
+  cellSet_(sheet, row, colIndex(sheet, 'Claimed At'), new Date());
 
   bumpSubCount(sub.id, 1);
   bumpTeamSub(sub.id, teamId, 1);
@@ -909,8 +978,8 @@ function actionWithdraw(data) {
   var row = findRowById(sheet, data.id);
   if (row === -1) return { status: 'error', message: 'That match is no longer listed.' };
 
-  var status = String(sheet.getRange(row, colIndex(sheet, 'Status')).getValue()).trim();
-  var claimedBy = String(sheet.getRange(row, colIndex(sheet, 'Claimed By')).getValue()).trim();
+  var status = String(cellGet_(sheet, row, colIndex(sheet, 'Status'))).trim();
+  var claimedBy = String(cellGet_(sheet, row, colIndex(sheet, 'Claimed By'))).trim();
   if (status !== 'filled' || !claimedBy) {
     return { status: 'error', message: 'Nobody is signed up for that match right now.' };
   }
@@ -936,12 +1005,12 @@ function doWithdraw_(requestId, subId) {
   var sheet = getSheet('Requests');
   var row = findRowById(sheet, requestId);
   if (row === -1) return;
-  var teamId = String(sheet.getRange(row, colIndex(sheet, 'TeamID')).getValue()).trim();
+  var teamId = String(cellGet_(sheet, row, colIndex(sheet, 'TeamID'))).trim();
 
-  sheet.getRange(row, colIndex(sheet, 'Status')).setValue('open');
-  sheet.getRange(row, colIndex(sheet, 'Claimed By')).setValue('');
-  sheet.getRange(row, colIndex(sheet, 'Claimed At')).setValue('');
-  sheet.getRange(row, colIndex(sheet, 'Nudged')).setValue(false);
+  cellSet_(sheet, row, colIndex(sheet, 'Status'), 'open');
+  cellSet_(sheet, row, colIndex(sheet, 'Claimed By'), '');
+  cellSet_(sheet, row, colIndex(sheet, 'Claimed At'), '');
+  cellSet_(sheet, row, colIndex(sheet, 'Nudged'), false);
 
   /* Backing out gives the slot back — it should not count against them. */
   bumpSubCount(subId, -1);
@@ -954,7 +1023,7 @@ function rawSub_(subId) {
   var sheet = getSheet('Subs');
   var row = findRowById(sheet, subId);
   if (row === -1) return null;
-  var get = function (header) { return sheet.getRange(row, colIndex(sheet, header)).getValue(); };
+  var get = function (header) { return cellGet_(sheet, row, colIndex(sheet, header)); };
   return {
     id: String(get('SubID')).trim(),
     name: String(get('Name')).trim(),
@@ -969,7 +1038,7 @@ function actionCancelRequest(data) {
   if (row === -1) return { status: 'error', message: 'That match is no longer listed.' };
 
   notifyCancellation(data.id);
-  sheet.getRange(row, colIndex(sheet, 'Status')).setValue('cancelled');
+  cellSet_(sheet, row, colIndex(sheet, 'Status'), 'cancelled');
   return { status: 'ok', message: 'Cancelled — everyone notified has been told.' };
 }
 
@@ -978,9 +1047,9 @@ function bumpSubCount(subId, delta) {
   var row = findRowById(sheet, subId);
   if (row === -1) return;
   var col = colIndex(sheet, 'Sub Count');
-  var current = Number(sheet.getRange(row, col).getValue()) || 0;
-  sheet.getRange(row, col).setValue(Math.max(0, current + delta));
-  if (delta > 0) sheet.getRange(row, colIndex(sheet, 'Last Sub')).setValue(new Date());
+  var current = Number(cellGet_(sheet, row, col)) || 0;
+  cellSet_(sheet, row, col, Math.max(0, current + delta));
+  if (delta > 0) cellSet_(sheet, row, colIndex(sheet, 'Last Sub'), new Date());
 }
 
 function logHistory(requestId, sub) {
@@ -1011,7 +1080,7 @@ function subRowForToken_(subId, token) {
   var sheet = getSheet('Subs');
   var row = findRowById(sheet, subId);
   if (row === -1) return null;
-  var stored = String(sheet.getRange(row, colIndex(sheet, 'Token')).getValue()).trim();
+  var stored = String(cellGet_(sheet, row, colIndex(sheet, 'Token'))).trim();
   if (!token || String(token).trim() !== stored) return null;
   return { sheet: sheet, row: row };
 }
@@ -1019,9 +1088,9 @@ function subRowForToken_(subId, token) {
 function subSummary_(hit) {
   var sh = hit.sheet, r = hit.row;
   return {
-    id: String(sh.getRange(r, colIndex(sh, 'SubID')).getValue()).trim(),
-    name: String(sh.getRange(r, colIndex(sh, 'Name')).getValue()).trim(),
-    level: normLevel(sh.getRange(r, colIndex(sh, 'Level')).getValue())
+    id: String(cellGet_(sh, r, colIndex(sh, 'SubID'))).trim(),
+    name: String(cellGet_(sh, r, colIndex(sh, 'Name'))).trim(),
+    level: normLevel(cellGet_(sh, r, colIndex(sh, 'Level')))
   };
 }
 
@@ -1043,22 +1112,22 @@ function actionEmailVerify(data) {
   var fields = ['Name', 'Phone', 'Level'];
   for (var f = 0; f < fields.length; f++) {
     var pendingCol = colIndex(sh, 'Pending ' + fields[f]);
-    var value = String(sh.getRange(r, pendingCol).getValue()).trim();
+    var value = String(cellGet_(sh, r, pendingCol)).trim();
     if (!value) continue;
     var liveCol = colIndex(sh, fields[f]);
     var next = fields[f] === 'Level' ? normLevel(value) : value;
     var current = fields[f] === 'Level'
-      ? normLevel(sh.getRange(r, liveCol).getValue())
-      : String(sh.getRange(r, liveCol).getValue()).trim();
+      ? normLevel(cellGet_(sh, r, liveCol))
+      : String(cellGet_(sh, r, liveCol)).trim();
     if (next !== current) {
-      sh.getRange(r, liveCol).setValue(next);
+      cellSet_(sh, r, liveCol, next);
       changed = true;
     }
-    sh.getRange(r, pendingCol).setValue('');
+    cellSet_(sh, r, pendingCol, '');
   }
 
-  sh.getRange(r, colIndex(sh, 'Verified')).setValue(true);
-  sh.getRange(r, colIndex(sh, 'Active')).setValue(true);
+  cellSet_(sh, r, colIndex(sh, 'Verified'), true);
+  cellSet_(sh, r, colIndex(sh, 'Active'), true);
   var sub = subSummary_(hit);
 
   if (changed) {
@@ -1148,7 +1217,7 @@ function actionEmailOptOut(data) {
   var hit = subRowForToken_(data.subId, data.token);
   if (!hit) return badLink_();
 
-  hit.sheet.getRange(hit.row, colIndex(hit.sheet, 'Active')).setValue(false);
+  cellSet_(hit.sheet, hit.row, colIndex(hit.sheet, 'Active'), false);
   var sub = subSummary_(hit);
   return {
     status: 'ok',
@@ -1163,14 +1232,14 @@ function handleVerify(subId, token) {
   var row = findRowById(sheet, subId);
   if (row === -1) return htmlPage('Link not recognized', 'We could not find that signup. Try signing up again in the app.', 'error');
 
-  var stored = String(sheet.getRange(row, colIndex(sheet, 'Token')).getValue()).trim();
+  var stored = String(cellGet_(sheet, row, colIndex(sheet, 'Token'))).trim();
   if (!token || token !== stored) {
     return htmlPage('Link not recognized', 'That confirmation link is not valid. Try signing up again in the app.', 'error');
   }
 
-  sheet.getRange(row, colIndex(sheet, 'Verified')).setValue(true);
-  sheet.getRange(row, colIndex(sheet, 'Active')).setValue(true);
-  var name = String(sheet.getRange(row, colIndex(sheet, 'Name')).getValue()).trim();
+  cellSet_(sheet, row, colIndex(sheet, 'Verified'), true);
+  cellSet_(sheet, row, colIndex(sheet, 'Active'), true);
+  var name = String(cellGet_(sheet, row, colIndex(sheet, 'Name'))).trim();
 
   return htmlPage("You're on the sub list",
     'Thanks ' + name + " — you're all set. Captains can now call on you, and you'll get an email whenever a match fits what you play.");
@@ -1181,7 +1250,7 @@ function handleClaimFromEmail(requestId, subId, token) {
   var subRow = findRowById(subSheet, subId);
   if (subRow === -1) return htmlPage('Link not recognized', 'We could not find you on the sub list.', 'error');
 
-  var stored = String(subSheet.getRange(subRow, colIndex(subSheet, 'Token')).getValue()).trim();
+  var stored = String(cellGet_(subSheet, subRow, colIndex(subSheet, 'Token'))).trim();
   if (!token || token !== stored) {
     return htmlPage('Link not recognized', 'That link is not valid. Open the app to claim this match instead.', 'error');
   }
@@ -1190,6 +1259,8 @@ function handleClaimFromEmail(requestId, subId, token) {
   try { lock.waitLock(20000); } catch (err) {
     return htmlPage('Try again', 'The server was busy. Refresh this page to try once more.', 'error');
   }
+  /* The token check above read the sheet before the lock; decide the claim on fresh data. */
+  resetCache_();
 
   try {
     var result = actionClaim({ id: requestId, subId: subId });
@@ -1216,11 +1287,11 @@ function handleOptOut(subId, token) {
   var row = findRowById(sheet, subId);
   if (row === -1) return htmlPage('Link not recognized', 'We could not find that account.', 'error');
 
-  var stored = String(sheet.getRange(row, colIndex(sheet, 'Token')).getValue()).trim();
+  var stored = String(cellGet_(sheet, row, colIndex(sheet, 'Token'))).trim();
   if (!token || token !== stored) return htmlPage('Link not recognized', 'That link is not valid.', 'error');
 
-  sheet.getRange(row, colIndex(sheet, 'Active')).setValue(false);
-  var name = String(sheet.getRange(row, colIndex(sheet, 'Name')).getValue()).trim();
+  cellSet_(sheet, row, colIndex(sheet, 'Active'), false);
+  var name = String(cellGet_(sheet, row, colIndex(sheet, 'Name'))).trim();
   return htmlPage("You're off the list",
     'No problem, ' + name + " — you won't get any more sub requests. Sign up again in the app anytime.");
 }
@@ -1302,7 +1373,7 @@ function subToken(subId) {
   var sheet = getSheet('Subs');
   var row = findRowById(sheet, subId);
   if (row === -1) return '';
-  return String(sheet.getRange(row, colIndex(sheet, 'Token')).getValue()).trim();
+  return String(cellGet_(sheet, row, colIndex(sheet, 'Token'))).trim();
 }
 
 /*
@@ -1734,7 +1805,7 @@ function sendNoResponseNudges() {
         subject: 'Still no sub — ' + team.name + ', ' + prettyDate(matchDate),
         body: body
       }, '', '');
-      sheet.getRange(r._row, nudgedCol).setValue(true);
+      cellSet_(sheet, r._row, nudgedCol, true);
     } catch (err) {
       Logger.log('Nudge email failed: ' + err);
     }

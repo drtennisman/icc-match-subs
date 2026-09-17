@@ -87,6 +87,21 @@ record is confirmed from **their own inbox** with a tokenized link:
 Claiming a match *inside the app* still isn't tied to a token — the receipt email is what
 catches misuse there.
 
+## Speed
+
+Every call to Google Sheets is a round trip of roughly 0.4 seconds, so the script reads
+each tab **once per request** and keeps that copy in step with every write (all writes go
+through `cellSet_` or `appendByHeader` — add new ones the same way, or the copy and the
+sheet drift apart). Apps Script starts each request with fresh globals, so nothing leaks
+between people. Anything that reads *before* taking the script lock calls `resetCache_()`
+once it has the lock, so a claim is never decided on a stale snapshot.
+
+That took opening the app with 40 subs from 432 sheet calls to 9, and posting a match to
+8 subs from 3,643 to 11 — the latter was longer than Apps Script allows a request to run.
+
+The app also shows each screen immediately and loads into it, rather than holding people
+on a blank screen while the sheet loads.
+
 ## Architecture
 
 | Piece | Where | Notes |

@@ -567,7 +567,7 @@
 /* ═══════════════════════════════════════════════════════
    CONFIG
    ═══════════════════════════════════════════════════════ */
-const APP_VERSION = 13; // must match VERSION in google-apps-script.js
+const APP_VERSION = 14; // must match VERSION in google-apps-script.js
 
 /*
  * Paste the deployed Apps Script Web App URL here once it exists.
@@ -915,12 +915,10 @@ function mySubRecordId() {
 async function chooseRole(role) {
   me.role = role;
   saveMe();
-  await ensureData();
 
   if (role === 'sub') {
     // Already a confirmed sub on this phone? Don't offer a second signup.
-    const rec = SUBS.find(s => s.id === me.subId);
-    if (rec && rec.verified) {
+    if (me.verified && me.subId) {
       document.getElementById('bottomNav').style.display = 'flex';
       updateChrome();
       navigate('matchesScreen', document.getElementById('tabMatches'));
@@ -2122,7 +2120,8 @@ async function boot() {
    */
   const invited = /[?&]join=/.test(location.search);
   if (invited && !(me.verified && me.subId)) {
-    await ensureData();
+    // The signup form needs nothing from the sheet, so show it straight away
+    // rather than holding a newcomer on a blank screen while data loads.
     // A captain opening an invite link to try it shouldn't lose captain mode.
     if (me.role !== 'captain') me.role = 'sub';
     saveMe();
@@ -2134,12 +2133,13 @@ async function boot() {
   if (!me.role) {
     showScreen('setupScreen');
     document.getElementById('bottomNav').style.display = 'none';
-    await ensureData();
+    ensureData();          // warm the data in the background
     return;
   }
 
+  // navigate() shows the screen first and loads into it, so a returning user
+  // never sits on the "which are you?" screen waiting for the sheet.
   document.getElementById('bottomNav').style.display = 'flex';
-  await ensureData();
   updateChrome();
 
   if (me.role === 'captain') {
